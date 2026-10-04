@@ -1,0 +1,150 @@
+{
+  "sessions": [
+    {
+      "thread_id": "session_896disde",
+      "created_at": "2026-10-04T05:18:49.957Z",
+      "last_active_at": "2026-10-04T05:18:49.957Z",
+      "title": "Summarize the uploaded documents"
+    }
+  ],
+  "messages": {
+    "session_896disde": [
+      {
+        "role": "user",
+        "content": "Summarize the uploaded documents",
+        "timestamp": "2026-10-04T05:19:02.273Z"
+      },
+      {
+        "role": "assistant",
+        "content": "Based on the indexed documents:\n\n• The primary model is Google Gemini (gemini-3.8-flash / gemini-3.1-flash-lite). If Gemini fails or hits rate limits, the system automatically falls back to Groq running llama-3.3-70b-versatile, ensuring high availability.\n\n• The system uses a hybrid retriever combining FAISS / vector semantic search and BM25 keyword search using an EnsembleRetriever, with weights 0.6 for semantic search and 0.4 for BM25. A cross-encoder reranker scores candidate chunks to eliminate false positives.\n\n• Our Agentic RAG system is built using LangGraph, FastAPI, and Streamlit (migrated to Node.js / React for AI Studio). It uses a single agent node with a ReAct loop. Rather than using external CRAG or Self-RAG evaluator nodes, quality control is handled entirely in the agent's system prompt to maintain agentic autonomy.\n\n• Conversation memory is persisted across turns using a checkpointer. Follow-up queries are rewritten with conversation context into standalone search queries before retrieval.",
+        "sources": [
+          {
+            "type": "vector_search",
+            "content": "The primary model is Google Gemini (gemini-3.8-flash / gemini-3.1-flash-lite). If Gemini fails or hits rate limits, the system automatically falls back to Groq running llama-3.3-70b-versatile, ensuring high availability.",
+            "source": "llm_guide.md",
+            "title": "llm_guide.md",
+            "pageNumber": 3,
+            "score": 0.34
+          },
+          {
+            "type": "vector_search",
+            "content": "The system uses a hybrid retriever combining FAISS / vector semantic search and BM25 keyword search using an EnsembleRetriever, with weights 0.6 for semantic search and 0.4 for BM25. A cross-encoder reranker scores candidate chunks to eliminate false positives.",
+            "source": "retriever_guide.md",
+            "title": "retriever_guide.md",
+            "pageNumber": 1,
+            "score": 0.26
+          },
+          {
+            "type": "vector_search",
+            "content": "Our Agentic RAG system is built using LangGraph, FastAPI, and Streamlit (migrated to Node.js / React for AI Studio). It uses a single agent node with a ReAct loop. Rather than using external CRAG or Self-RAG evaluator nodes, quality control is handled entirely in the agent's system prompt to maintain agentic autonomy.",
+            "source": "architecture_guide.md",
+            "title": "architecture_guide.md",
+            "pageNumber": 1,
+            "score": 0.22
+          },
+          {
+            "type": "vector_search",
+            "content": "Conversation memory is persisted across turns using a checkpointer. Follow-up queries are rewritten with conversation context into standalone search queries before retrieval.",
+            "source": "memory_guide.md",
+            "title": "memory_guide.md",
+            "pageNumber": 2,
+            "score": 0.05
+          }
+        ],
+        "timestamp": "2026-10-04T05:19:02.273Z"
+      }
+    ],
+    "test_session": [
+      {
+        "role": "user",
+        "content": "Summarize the system architecture",
+        "timestamp": "2026-10-04T05:21:58.477Z"
+      },
+      {
+        "role": "assistant",
+        "content": "**System Architecture Overview**\n\n| Component | Description | Key Details |\n|-----------|-------------|-------------|\n| **LLM Engine** | Primary generative model and fallback | • Primary: **Google Gemini** (gemini‑3.8‑flash / gemini‑3.1‑flash‑lite).<br>• Fallback (on failure or rate‑limit): **Groq** running **llama‑3.3‑70b‑versatile** to keep the service available.【Source: llm_guide.md, Page: 3】 |\n| **Retriever** | Hybrid search that balances semantic relevance and keyword matching | • **FAISS** vector store for semantic similarity.<br>• **BM25** for keyword‑based recall.<br>• Combined via an **EnsembleRetriever** with weights **0.6 (semantic)** + **0.4 (BM25)**.<br>• A **cross‑encoder reranker** re‑scores the candidate chunks to prune false positives.【Source: retriever_guide.md, Page: 1】 |\n| **Agentic RAG Layer** | Orchestrates retrieval, reasoning, and response generation | • Built with **LangGraph** for graph‑based agent orchestration.<br>• Exposes APIs via **FastAPI** and a UI via **Streamlit** (now migrated to **Node.js/React** for AI Studio).<br>• Uses a **single agent node** that runs a **ReAct loop** (Reason → Act → Observe → Repeat).<br>• Quality control is embedded in the agent’s system prompt rather than separate evaluator nodes, preserving agentic autonomy.【Source: architecture_guide.md, Page: 1】 |\n| **Memory & State Management** | Persists conversation context across turns | • A **checkpointer** stores the conversation state.<br>• Incoming follow‑up queries are rewritten into **stand‑alone search queries** that include the relevant context before being sent to the retriever.【Source: memory_guide.md, Page: 2】 |\n\n**High‑Level Flow**\n\n1. **User query** → rewritten with conversation memory → sent to **Hybrid Retriever**.  \n2. Retriever returns top‑k chunks; **cross‑encoder reranker** refines the list.  \n3. Chunks + query are fed to the **Agentic RAG node** (ReAct loop).  \n4. Agent calls the **primary LLM (Gemini)**; if unavailable, it falls back to **Groq/llama‑3.3‑70b‑versatile**.  \n5. Generated answer is returned via **FastAPI** to the front‑end (Streamlit/React).  \n\nThis architecture blends robust LLM selection, a balanced hybrid retrieval strategy, and an autonomous agent loop, all while maintaining conversational continuity through persisted memory.",
+        "sources": [
+          {
+            "type": "vector_search",
+            "content": "The primary model is Google Gemini (gemini-3.8-flash / gemini-3.1-flash-lite). If Gemini fails or hits rate limits, the system automatically falls back to Groq running llama-3.3-70b-versatile, ensuring high availability.",
+            "source": "llm_guide.md",
+            "title": "llm_guide.md",
+            "pageNumber": 3,
+            "score": 0.46
+          },
+          {
+            "type": "vector_search",
+            "content": "The system uses a hybrid retriever combining FAISS / vector semantic search and BM25 keyword search using an EnsembleRetriever, with weights 0.6 for semantic search and 0.4 for BM25. A cross-encoder reranker scores candidate chunks to eliminate false positives.",
+            "source": "retriever_guide.md",
+            "title": "retriever_guide.md",
+            "pageNumber": 1,
+            "score": 0.42
+          },
+          {
+            "type": "vector_search",
+            "content": "Our Agentic RAG system is built using LangGraph, FastAPI, and Streamlit (migrated to Node.js / React for AI Studio). It uses a single agent node with a ReAct loop. Rather than using external CRAG or Self-RAG evaluator nodes, quality control is handled entirely in the agent's system prompt to maintain agentic autonomy.",
+            "source": "architecture_guide.md",
+            "title": "architecture_guide.md",
+            "pageNumber": 1,
+            "score": 0.37
+          },
+          {
+            "type": "vector_search",
+            "content": "Conversation memory is persisted across turns using a checkpointer. Follow-up queries are rewritten with conversation context into standalone search queries before retrieval.",
+            "source": "memory_guide.md",
+            "title": "memory_guide.md",
+            "pageNumber": 2,
+            "score": 0.19
+          }
+        ],
+        "timestamp": "2026-10-04T05:21:58.478Z"
+      }
+    ],
+    "test_thread": [
+      {
+        "role": "user",
+        "content": "What is BM25?",
+        "timestamp": "2026-10-04T19:48:02.908Z"
+      },
+      {
+        "role": "assistant",
+        "content": "**BM25** (short for **Best Matching 25**, often referred to as **Okapi BM25**) is a widely used probabilistic ranking function in information retrieval and search engines. It estimates the relevance of a document to a given search query based on keyword matching.\n\n---\n\n### How BM25 Works\n\nBM25 is an advanced extension of the classic **TF-IDF** (Term Frequency–Inverse Document Frequency) model. It evaluates queries based on three core components:\n\n1. **Term Frequency (TF) Saturation:**\n   * In traditional TF-IDF, a term appearing 20 times scores 20 times higher than a term appearing once.\n   * BM25 introduces **non-linear saturation**: as the term frequency increases, the score asymptotically approaches an upper limit. This prevents documents with repeated keyword spamming from artificially dominating the rankings.\n\n2. **Inverse Document Frequency (IDF):**\n   * Rare words that appear in only a few documents (e.g., specific technical terms or names) carry a much higher weight than common words (e.g., \"the\", \"system\", \"is\").\n\n3. **Document Length Normalization:**\n   * Longer documents naturally contain more words and might match query terms purely by chance. BM25 normalizes scores relative to the average document length across the entire corpus.\n\n---\n\n### Key Formula & Parameters\n\nThe BM25 score for a document $D$ given a query $Q$ with terms $q_1, q_2, \\dots, q_n$ is computed as:\n\n$$\\text{Score}(D, Q) = \\sum_{i=1}^{n} \\text{IDF}(q_i) \\cdot \\frac{f(q_i, D) \\cdot (k_1 + 1)}{f(q_i, D) + k_1 \\cdot \\left(1 - b + b \\cdot \\frac{|D|}{\\text{avgdl}}\\right)}$$\n\nWhere:\n* **$f(q_i, D)$**: Frequency of term $q_i$ in document $D$.\n* **$|D|$ / $\\text{avgdl}$**: Length of document $D$ divided by the average document length in the corpus.\n* **$k_1$ (typically $1.2$ – $2.0$)**: Controls term frequency saturation. Higher values allow higher term counts to contribute more to the score.\n* **$b$ (typically $0.75$)**: Controls document length normalization ($b=1$ means full normalization; $b=0$ disables length normalization).\n\n---\n\n### Modern Role: Hybrid Search & RAG\n\nWhile deep-learning-based dense retrievers (embedding/vector search) excel at semantic similarity, they can struggle with exact keyword matching (e.g., part numbers, product names, acronyms, or rare terms). \n\nBecause of this, modern retrieval systems frequently pair BM25 with vector search in a **hybrid retrieval** pipeline to combine the strengths of exact lexical matching and semantic understanding [Source: retriever_guide.md, Page: 1].",
+        "sources": [
+          {
+            "type": "vector_search",
+            "content": "The system uses a hybrid retriever combining FAISS / vector semantic search and BM25 keyword search using an EnsembleRetriever, with weights 0.6 for semantic search and 0.4 for BM25. A cross-encoder reranker scores candidate chunks to eliminate false positives.",
+            "source": "retriever_guide.md",
+            "title": "retriever_guide.md",
+            "pageNumber": 1,
+            "score": 0.81
+          },
+          {
+            "type": "vector_search",
+            "content": "Our Agentic RAG system is built using LangGraph, FastAPI, and Streamlit (migrated to Node.js / React for AI Studio). It uses a single agent node with a ReAct loop. Rather than using external CRAG or Self-RAG evaluator nodes, quality control is handled entirely in the agent's system prompt to maintain agentic autonomy.",
+            "source": "architecture_guide.md",
+            "title": "architecture_guide.md",
+            "pageNumber": 1,
+            "score": 0.19
+          },
+          {
+            "type": "vector_search",
+            "content": "Conversation memory is persisted across turns using a checkpointer. Follow-up queries are rewritten with conversation context into standalone search queries before retrieval.",
+            "source": "memory_guide.md",
+            "title": "memory_guide.md",
+            "pageNumber": 2,
+            "score": 0.19
+          },
+          {
+            "type": "vector_search",
+            "content": "The primary model is Google Gemini (gemini-3.8-flash / gemini-3.1-flash-lite). If Gemini fails or hits rate limits, the system automatically falls back to Groq running llama-3.3-70b-versatile, ensuring high availability.",
+            "source": "llm_guide.md",
+            "title": "llm_guide.md",
+            "pageNumber": 3,
+            "score": 0.19
+          }
+        ],
+        "timestamp": "2026-10-04T19:48:02.909Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+"""NaviGraph FastAPI Application Package"""

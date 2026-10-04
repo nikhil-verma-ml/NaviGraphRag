@@ -1,0 +1,7 @@
+{
+  "name": "NaviGraph — Agentic RAG System",
+  "description": "Agentic RAG system with autonomous ReAct reasoning, hybrid retrieval (vector + BM25), web search fallback, and document ingestion.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
