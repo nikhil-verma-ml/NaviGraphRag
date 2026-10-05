@@ -36,6 +36,8 @@ export interface LatencyMetrics {
   costUsd?: number;
   costFormatted?: string;
   gatewayStatus?: 'healthy' | 'fallback_active' | 'offline_react';
+  perTokenMs?: number;
+  tokenLatencies?: number[];
 }
 
 export interface AgentStreamCallbacks {
@@ -157,6 +159,7 @@ export async function runAgentStream(
       });
 
       const functionCalls = firstResponse.functionCalls;
+      const chunkLatencies: number[] = [];
 
       if (functionCalls && functionCalls.length > 0) {
         const toolResponsesParts: any[] = [];
@@ -219,6 +222,7 @@ export async function runAgentStream(
         ];
 
         const llmStart = Date.now();
+        let lastChunkTime = llmStart;
         let hasReceivedFirstToken = false;
 
         const streamResponse = await ai.models.generateContentStream({
@@ -233,10 +237,14 @@ export async function runAgentStream(
         for await (const chunk of streamResponse) {
           const text = chunk.text;
           if (text) {
+            const now = Date.now();
             if (!hasReceivedFirstToken) {
               hasReceivedFirstToken = true;
-              latency.llmFirstTokenMs = Date.now() - llmStart;
+              latency.llmFirstTokenMs = now - llmStart;
+            } else {
+              chunkLatencies.push(Math.max(1, now - lastChunkTime));
             }
+            lastChunkTime = now;
             fullAnswer += text;
             callbacks.onToken(text);
           }
@@ -246,6 +254,7 @@ export async function runAgentStream(
         // Direct answer
         callbacks.onThinking('🧠 Directly formulating response from conversation context');
         const llmStart = Date.now();
+        let lastChunkTime = llmStart;
         let hasReceivedFirstToken = false;
 
         const streamResponse = await ai.models.generateContentStream({
@@ -260,10 +269,14 @@ export async function runAgentStream(
         for await (const chunk of streamResponse) {
           const text = chunk.text;
           if (text) {
+            const now = Date.now();
             if (!hasReceivedFirstToken) {
               hasReceivedFirstToken = true;
-              latency.llmFirstTokenMs = Date.now() - llmStart;
+              latency.llmFirstTokenMs = now - llmStart;
+            } else {
+              chunkLatencies.push(Math.max(1, now - lastChunkTime));
             }
+            lastChunkTime = now;
             fullAnswer += text;
             callbacks.onToken(text);
           }
@@ -289,6 +302,12 @@ export async function runAgentStream(
         latency.llmTotalMs && latency.llmTotalMs > 0
           ? Number(((latency.completionTokens / (latency.llmTotalMs / 1000))).toFixed(1))
           : 0;
+
+      latency.perTokenMs =
+        latency.completionTokens > 0
+          ? Number(((latency.llmTotalMs || 0) / latency.completionTokens).toFixed(2))
+          : 0;
+      latency.tokenLatencies = chunkLatencies.slice(0, 40);
 
       // Gemini 3.8 Flash pricing: $0.075 / 1M input tokens, $0.30 / 1M output tokens
       const inputCost = latency.promptTokens * (0.075 / 1_000_000);

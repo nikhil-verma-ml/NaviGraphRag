@@ -14,9 +14,11 @@ import {
   Gauge,
   Clock,
   Activity,
+  BarChart3,
 } from 'lucide-react';
 import { ThinkingAccordion } from './ThinkingAccordion.js';
 import { SourcesExpander } from './SourcesExpander.js';
+import { LatencyMetricsDashboard } from './LatencyMetricsDashboard.js';
 import { ChatMessage as ChatMessageType } from '../types.js';
 
 interface ChatMessageProps {
@@ -41,6 +43,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const isUser = message.role === 'user';
   const isVoiceInput = message.inputType === 'voice';
   const [showLatencyDetails, setShowLatencyDetails] = useState(false);
+  const [showVisualCharts, setShowVisualCharts] = useState(false);
 
   return (
     <div
@@ -195,15 +198,39 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             {showLatencyDetails && (
               <div className="mt-2.5 rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs font-mono text-[11px]">
                 {/* Table Header Bar */}
-                <div className="bg-slate-50/90 px-3.5 py-2 border-b border-slate-200 flex items-center justify-between">
+                <div className="bg-slate-50/90 px-3.5 py-2 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <Activity className="w-3.5 h-3.5 text-blue-600" />
                     <span className="font-bold text-slate-800 text-xs">LLM Gateway Telemetry</span>
+                    <span className="text-[10px] text-slate-400 font-normal">|</span>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      Route: <span className="text-slate-800 font-semibold">{message.latency.provider}</span>
+                    </span>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-medium">
-                    Route: <span className="text-slate-800 font-semibold">{message.latency.provider}</span> • Model: <span className="text-slate-800 font-semibold">{message.latency.model}</span>
-                  </span>
+
+                  {/* Toggle Visual Charts using recharts */}
+                  <button
+                    onClick={() => setShowVisualCharts(!showVisualCharts)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono border transition-all cursor-pointer ${
+                      showVisualCharts
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs font-semibold'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    <span>{showVisualCharts ? 'Hide Visual Charts' : 'View Visual Charts'}</span>
+                  </button>
                 </div>
+
+                {/* Optional Expanded Recharts Visual Performance Breakdown */}
+                {showVisualCharts && (
+                  <div className="p-3 border-b border-slate-200 bg-slate-50/40">
+                    <LatencyMetricsDashboard
+                      metrics={message.latency}
+                      isOpen={true}
+                    />
+                  </div>
+                )}
 
                 {/* Structured Table */}
                 <div className="overflow-x-auto">

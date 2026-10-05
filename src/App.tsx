@@ -13,11 +13,13 @@ import {
   Mic,
   Headphones,
   Radio,
+  Activity,
 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar.js';
 import { ChatMessage } from './components/ChatMessage.js';
 import { VoiceRecorderButton } from './components/VoiceRecorderButton.js';
 import { VoiceConversationOverlay } from './components/VoiceConversationOverlay.js';
+import { LatencyMetricsDashboard } from './components/LatencyMetricsDashboard.js';
 import {
   ChatMessage as ChatMessageType,
   SessionInfo,
@@ -59,6 +61,7 @@ export function App() {
   const [speakAnswers, setSpeakAnswers] = useState<boolean>(true);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [latestLatency, setLatestLatency] = useState<LatencyMetrics | undefined>();
+  const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState<boolean>(false);
 
   // Computed ChatGPT-like Conversation State: IDLE, LISTENING, THINKING, SPEAKING
   const conversationState: VoiceConversationState = !voiceModeActive
@@ -643,6 +646,25 @@ export function App() {
               </button>
             )}
 
+            {/* Live LLM Performance Dashboard Trigger Button */}
+            {latestLatency && (
+              <button
+                type="button"
+                onClick={() => setIsPerformanceModalOpen(true)}
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-mono transition-colors shadow-2xs cursor-pointer"
+                title="Open LLM Gateway Performance Dashboard"
+              >
+                <Activity className="w-3.5 h-3.5 text-blue-600" />
+                <span className="font-semibold text-slate-800">
+                  TTFT: {latestLatency.llmFirstTokenMs || 0}ms
+                </span>
+                <span className="text-slate-300">•</span>
+                <span className="text-indigo-600 font-semibold">
+                  {latestLatency.tokensPerSec || 0} tok/s
+                </span>
+              </button>
+            )}
+
             {/* Quick Header Voice Mode Launcher */}
             <button
               type="button"
@@ -857,6 +879,16 @@ export function App() {
           </form>
         </div>
       </main>
+
+      {/* Advanced LLM Performance Monitor Modal */}
+      {isPerformanceModalOpen && latestLatency && (
+        <LatencyMetricsDashboard
+          metrics={latestLatency}
+          isOpen={isPerformanceModalOpen}
+          onClose={() => setIsPerformanceModalOpen(false)}
+          isModal={true}
+        />
+      )}
     </div>
   );
 }

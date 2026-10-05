@@ -26,6 +26,8 @@ export interface LatencyMetrics {
   costUsd?: number;
   costFormatted?: string;
   gatewayStatus?: 'healthy' | 'fallback_active' | 'offline_react';
+  perTokenMs?: number;
+  tokenLatencies?: number[];
 }
 
 export interface ChatMessage {
