@@ -7,7 +7,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-4.0-38bdf8?logo=tailwindcss)](https://tailwindcss.com/)
 [![Recharts](https://img.shields.io/badge/Recharts-2.x-22c55e)](https://recharts.org/)
 
-**NaviGraph** is a high-speed, voice-first **Agentic Retrieval-Augmented Generation (RAG)** platform designed for conversational exploration of multi-page technical documents, enterprise PDFs, and live knowledge bases. It pairs a **ChatGPT-web-style floating Voice Mode** with a progressive streaming chat interface, hybrid vector/BM25 retrieval, cross-encoder reranking, and full LLM gateway telemetry.
+**NaviGraph** is a high-speed, voice-first **Agentic Retrieval-Augmented Generation (RAG)** platform designed for conversational exploration of multi-page technical documents, enterprise PDFs, and live knowledge bases. It pairs a **floating Voice Mode widget with interchangeable visualizer styles** with a progressive streaming chat interface, hybrid vector/BM25 retrieval, cross-encoder reranking, robust Web Audio API autoplay resumption, and full LLM gateway telemetry.
 
 ---
 
@@ -15,7 +15,7 @@
 
 | Component | Production URL | Description |
 | :--- | :--- | :--- |
-| **Frontend UI** | [https://navigraphai.vercel.app/](https://navigraphai.vercel.app/) | React 19 SPA with Floating Voice Orb, Document Viewer, Recharts Telemetry Dashboard |
+| **Frontend UI** | [https://navigraphai.vercel.app/](https://navigraphai.vercel.app/) | React 19 SPA with Floating Voice Orb, Multi-Style Visualizer, Document Viewer, Recharts Telemetry Dashboard |
 | **Backend API** | [https://navigraph-api.vercel.app/](https://navigraph-api.vercel.app/) | Express + Node.js API with SSE streaming, Hybrid Vector Search, Edge-TTS, and STT |
 
 ---
@@ -27,10 +27,10 @@
                                     │               USER BROWSER / CLIENT                    │
                                     │         https://navigraphai.vercel.app/               │
                                     └────────────────────────────────────────────────────────┘
-                                               │                                  ▲
-                                   Voice / Mic │                      Live Tokens │ & Audio
-                                       (WebRTC/VAD)                       (SSE)   │
-                                               ▼                                  │
+                                                │                                  ▲
+                                    Voice / Mic │                      Live Tokens │ & Audio
+                                        (WebRTC/VAD)                       (SSE)   │
+                                                ▼                                  │
 ┌─────────────────────────────────────────────────────────────────────────────────┴──────────┐
 │                             NAVIGRAPH BACKEND API GATEWAY                                  │
 │                          https://navigraph-api.vercel.app/                                 │
@@ -86,11 +86,14 @@
 ├────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                            │
 │   ┌────────────────────────────────────────────────┐   ┌───────────────────────────────┐   │
-│   │ 1. Continuous Chat Feed (100% visible)         │   │ 2. Floating Voice Orb Widget  │   │
-│   │ • Live progressive token markdown rendering    │   │ • 56px reactive circular orb  │   │
-│   │ • Page-level PDF click-through & viewer modal  │   │ • Web Audio API AnalyserNode  │   │
-│   │ • LLM telemetry footer table (TTFT, $, tok/s)  │   │ • Live audio volume scaling   │   │
-│   │ • Recharts visual latency & cost dashboard     │   │ • Interrupt, Mute & Exit      │   │
+│   │ 1. Continuous Chat Feed (100% visible)         │   │ 2. Floating Voice Widget       │   │
+│   │ • Live progressive token markdown rendering    │   │ • fixed bottom-6 right-6 w-72 │   │
+│   │ • Page-level PDF click-through & viewer modal  │   │ • Multi-Style VoiceOrb Engine │   │
+│   │ • LLM telemetry footer table (TTFT, $, tok/s)  │   │   - 🟣 3D Circular Orb        │   │
+│   │ • Recharts visual latency & cost dashboard     │   │   - 📊 Bar Graph Spectrum     │   │
+│   │ • Visual 'Unmute/Activate Audio' button        │   │   - 🌊 Circular Ripple Waves  │   │
+│   │ • Autoplay AudioContext recovery               │   │ • Real-time Web Audio Analyser│   │
+│   │                                                │   │ • Settings icon & persistence │   │
 │   └────────────────────────────────────────────────┘   └───────────────────────────────┘   │
 │                                                                                            │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -98,35 +101,168 @@
 
 ---
 
-## Key Highlights
+## Voice Mode & Orb Visualization Engine
 
-### 1. ChatGPT-Web-Style Floating Voice Mode
-* **Non-blocking floating presence**: Voice Mode floats as a compact widget (`fixed bottom-24 right-6`) over the chat screen instead of blocking or replacing the interface.
-* **Continuous live chat stream**: Users can read the AI response streaming in the main chat view, review past messages, and scroll freely while listening.
-* **Web Audio API-driven Voice Orb**:
-  * Connected to an `AnalyserNode` calculating 60FPS frequency energy.
-  * Dynamically scales and glows using GPU-accelerated CSS transforms (`transform: scale(...)`).
-  * Seamless state transitions:
-    * `IDLE`: Subtle resting pearl animation.
-    * `LISTENING`: Pulsing cyan glow indicating live microphone capture.
-    * `THINKING`: Hypnotic amber/gold celestial wave during RAG search.
-    * `SPEAKING`: Electric indigo/purple expansion reacting in real time to TTS audio.
-* **Instant Barge-in**: Tapping "Interrupt" or speaking interrupts TTS playback instantly and transfers control back to the user.
+### 1. Visualization Styles Toggle
+Users can customize the live VoiceOrb animation style in real time by clicking the **Settings (`⚙️`)** icon located in the floating card header. Preferences are saved automatically to `localStorage`:
 
-### 2. Multi-PDF Document Ingestion & Page-Level Grounding
-* **Structured PDF Chunking**: Extracts raw text while tracking original page numbers.
-* **Multi-PDF Filter Selector**: Focus queries on specific files or search across all indexed documents simultaneously.
-* **Document Viewer Modal**: Click any cited source to inspect the passage directly on the exact page.
+```
+                       ┌──────────────────────────────────────────────┐
+                       │           VOICE ORB VISUALIZATION            │
+                       └──────────────────────┬───────────────────────┘
+                                              │
+                    ┌─────────────────────────┼─────────────────────────┐
+                    │                         │                         │
+                    ▼                         ▼                         ▼
+         ┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+         │   1. CIRCULAR ORB   │   │  2. BAR SPECTRUM    │   │  3. RIPPLE WAVES    │
+         │     ('circular')    │   │      ('bars')       │   │      ('wave')       │
+         ├─────────────────────┤   ├─────────────────────┤   ├─────────────────────┤
+         │ • 3D radial sphere  │   │ • 9-band equalizer  │   │ • Concentric radar  │
+         │ • Specular light    │   │ • Dynamic heights   │   │   acoustic rings    │
+         │ • Diffuse aura glow │   │ • Frequency binning │   │ • Radial dispersion │
+         │ • Scale transforms  │   │ • Pill-shaped caps  │   │ • Pulse core        │
+         └─────────────────────┘   └─────────────────────┘   └─────────────────────┘
+```
 
-### 3. LLM Gateway Telemetry & Recharts Analytics
-* **Telemetry Table**: Rendered in the chat footer of every assistant turn:
-  * **Latency**: Time to First Token (TTFT), LLM Generation Time, Hybrid Retrieval, Total Turnaround.
-  * **Token Usage**: Prompt tokens, Completion tokens, Total billable tokens, Throughput ($\text{tok/s}$).
-  * **Cost Estimation**: Accurate sub-cent billing based on token unit pricing ($\$0.075 / 1\text{M}$ input, $\$0.30 / 1\text{M}$ output).
-* **LatencyMetricsDashboard**:
-  * Horizontal pipeline breakdown (`BarChart`).
-  * Per-token streaming latency timeline (`AreaChart`).
-  * Token context distribution (`PieChart`).
+* **🟣 Circular 3D Orb (`circular`)**: The signature floating celestial sphere rendered with multi-layered specular highlight reflections, dynamic ambient aura, and 60FPS scale lerping responding to audio frequency energy.
+* **📊 Bar Graph Spectrum (`bars`)**: A 9-band vertical equalizer spectrum whose individual bar heights jump and dance dynamically according to real-time Web Audio API frequency bins and audio level.
+* **🌊 Circular Ripple Waves (`wave`)**: Concentric acoustic sound wave rings that radiate outward dynamically from an inner core based on vocal intensity and harmonic resonance.
+
+### 2. Voice State Machine
+
+```
+      ┌─────────────────────────────────────────────────────────────────────┐
+      │                                IDLE                                 │
+      │                  (Resting soft pearl glow, 0.92x)                   │
+      └──────────────────────────────────┬──────────────────────────────────┘
+                                         │ User clicks Voice / Mic
+                                         ▼
+      ┌─────────────────────────────────────────────────────────────────────┐
+      │                              LISTENING                              │
+      │        (Electric Cyan pulse, live mic analyser volume tracking)     │
+      └──────────────────────────────────┬──────────────────────────────────┘
+                                         │ VAD detects silence / user speaks
+                                         ▼
+      ┌─────────────────────────────────────────────────────────────────────┐
+      │                              THINKING                               │
+      │            (Celestial Amber breathing wave, RAG Retrieval)          │
+      └──────────────────────────────────┬──────────────────────────────────┘
+                                         │ First token & TTS audio chunks arrive
+                                         ▼
+      ┌─────────────────────────────────────────────────────────────────────┐
+      │                              SPEAKING                               │
+      │     (Luminous Indigo expansion, 1.35x scale, real-time TTS sync)     │
+      └──────────────────────────────────┬──────────────────────────────────┘
+                                         │ Audio finishes / Queue empty
+                                         └─────────► Auto-returns to LISTENING
+                                                     (or IDLE on exit)
+```
+
+---
+
+## Audio Autoplay Resumption & Telemetry
+
+Modern browsers (Chrome, Edge, Safari) strictly enforce Autoplay policies that suspend an `AudioContext` until a direct user gesture occurs. NaviGraph implements an ironclad resumption strategy:
+
+### Resumption Flow Graph
+
+```
+                                [Browser Initial Load]
+                                          │
+                                          ▼
+                               AudioContext: 'suspended'
+                                          │
+                   ┌──────────────────────┴──────────────────────┐
+                   │                                             │
+                   ▼                                             ▼
+       [Navbar Warning Button]                       [Floating Voice Widget]
+    "Unmute / Activate Audio"                     "Unmute / Activate Audio"
+                   │                                             │
+                   └──────────────────────┬──────────────────────┘
+                                          │
+                            User Click (Primary Gesture)
+                                          │
+                                          ▼
+                         await audioContext.resume()
+                         await queue.resumeAudioContext()
+                                          │
+                                          ▼
+                               AudioContext: 'running'
+                                          │
+                                          ▼
+                       Buttons auto-dismiss; Audio unlocked
+```
+
+### Explicit Verification Logging
+* `StreamingAudioQueue.enqueueSentence` logs:
+  * Raw and sanitized sentence strings.
+  * AudioContext state verification (`running` vs `suspended`).
+  * Outgoing `/voice/tts` request dispatch, latency in milliseconds, and HTTP status.
+  * Binary audio Blob reception, byte count verification, and audio element instantiation.
+* `src/App.tsx` logs:
+  * AudioContext instantiation parameters (`sampleRate`, `baseLatency`, initial state).
+  * Real-time `onstatechange` transitions.
+  * Full trace during `handleActivateAudio` clicks before and after resumption.
+
+---
+
+## Agentic RAG Pipeline with Document Grounding
+
+NaviGraph combines dense neural semantic search with exact sparse BM25 retrieval to achieve grounded answers with verifiable page-level citations:
+
+```
+[User Query] ────────────────────────────────────────────────────────┐
+                                                                     ▼
+                                                   ┌───────────────────────────────────┐
+                                                   │   Contextual Query Rewriting      │
+                                                   └─────────────────┬─────────────────┘
+                                                                     │
+                                      ┌──────────────────────────────┴──────────────────────────────┐
+                                      ▼                                                             ▼
+                       ┌───────────────────────────────┐                             ┌──────────────────────────────┐
+                       │  Dense Semantic Vector Search │                             │  BM25 Sparse Lexical Search  │
+                       │   (Cosine similarity scoring) │                             │   (Exact token occurrences)  │
+                       └──────────────┬────────────────┘                             └──────────────┬───────────────┘
+                                      │                                                             │
+                                      └──────────────────────────────┬──────────────────────────────┘
+                                                                     ▼
+                                                   ┌───────────────────────────────────┐
+                                                   │    Hybrid Candidate Aggregation   │
+                                                   └─────────────────┬─────────────────┘
+                                                                     ▼
+                                                   ┌───────────────────────────────────┐
+                                                   │   Cross-Encoder Reranker Scoring  │
+                                                   └─────────────────┬─────────────────┘
+                                                                     ▼
+                                                   ┌───────────────────────────────────┐
+                                                   │     Top-K Ranked Context Chunks   │
+                                                   └─────────────────┬─────────────────┘
+                                                                     ▼
+                                                   ┌───────────────────────────────────┐
+                                                   │    Page-Level PDF Grounding &     │
+                                                   │    Source Citation Attachments    │
+                                                   └───────────────────────────────────┘
+```
+
+---
+
+## LLM Gateway Telemetry & Recharts Analytics
+
+Every assistant response streams structured performance metrics displayed in both an inline footer table and an interactive **LLM Gateway Performance Dashboard** powered by Recharts:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        LLM GATEWAY REAL-TIME PERFORMANCE METRICS                       │
+├────────────────────┬────────────────────┬────────────────────┬─────────────────────────┤
+│ TTFT (First Token) │ Generation Speed   │ Prompt / Out Toks  │ Estimated Cost          │
+│ 320 ms             │ 84.2 tok/s         │ 1,420 / 380 toks   │ $0.00022 USD            │
+└────────────────────┴────────────────────┴────────────────────┴─────────────────────────┘
+```
+
+* **Time to First Token (TTFT)**: Visualized in latency pipeline bar charts breaking down STT, retrieval, reranking, and first token arrival.
+* **Token Throughput Timeline**: Area charts showing per-second token emission velocity.
+* **Context Ratio Distribution**: Donut and pie charts displaying Prompt vs. Retrieved Document Context vs. Completion tokens.
 
 ---
 
@@ -148,57 +284,6 @@ export const API_BASE_URL: string = (() => {
   // 3. Local dev fallback (relative proxy)
   return '';
 })();
-```
-
-### CORS Configuration
-The backend explicitly allows requests from `https://navigraphai.vercel.app`, Vercel preview URLs, and `localhost`:
-
-```typescript
-// server.ts
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (
-        origin.includes('navigraphai.vercel.app') ||
-        origin.includes('navigraph-api.vercel.app') ||
-        origin.includes('localhost') ||
-        origin.endsWith('.vercel.app')
-      ) {
-        return callback(null, true);
-      }
-      return callback(null, true);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
-    exposedHeaders: ['X-TTS-Latency-Ms'],
-  })
-);
-```
-
----
-
-## Environment Variables
-
-Configure these variables in your deployment settings:
-
-### Frontend (.env or Vercel Environment Variables)
-```bash
-# Point frontend to production backend URL
-VITE_API_URL=https://navigraph-api.vercel.app
-```
-
-### Backend (.env or Vercel / Cloud Run Environment Variables)
-```bash
-# Primary LLM API Key (Google AI Studio)
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Optional High-Speed Fallback API Key (Groq)
-GROQ_API_KEY=your_groq_api_key_here
-
-# Server Port (default 3000)
-PORT=3000
 ```
 
 ---

@@ -63,6 +63,8 @@ export function App() {
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [latestLatency, setLatestLatency] = useState<LatencyMetrics | undefined>();
   const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState<boolean>(false);
+  const [audioContextState, setAudioContextState] = useState<AudioContextState | 'unavailable' | 'unknown'>('unknown');
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Computed ChatGPT-like Conversation State: IDLE, LISTENING, THINKING, SPEAKING
   const conversationState: VoiceConversationState = !voiceModeActive
@@ -175,6 +177,72 @@ export function App() {
     }
   }, [continuousVoice]);
 
+  // Initialize Web Audio API context & event listener with explicit logging
+  useEffect(() => {
+    console.log('[Web Audio API in App.tsx] Initializing AudioContext...');
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtx) {
+      try {
+        const ctx = new AudioCtx();
+        audioContextRef.current = ctx;
+        console.log('[Web Audio API in App.tsx] AudioContext successfully initialized:', {
+          state: ctx.state,
+          sampleRate: ctx.sampleRate,
+          baseLatency: ctx.baseLatency,
+          isSuspended: ctx.state === 'suspended',
+        });
+        setAudioContextState(ctx.state);
+
+        ctx.onstatechange = () => {
+          console.log('[Web Audio API in App.tsx] AudioContext.onstatechange event:', {
+            previousState: audioContextState,
+            newState: ctx.state,
+          });
+          setAudioContextState(ctx.state);
+        };
+
+        if (audioQueueRef.current) {
+          audioQueueRef.current.setAudioContext(ctx);
+        }
+      } catch (err) {
+        console.error('[Web Audio API in App.tsx] Error instantiating AudioContext:', err);
+        setAudioContextState('unavailable');
+      }
+    } else {
+      console.warn('[Web Audio API in App.tsx] Web Audio API not supported in this browser.');
+      setAudioContextState('unavailable');
+    }
+
+    return () => {
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        console.log('[Web Audio API in App.tsx] Closing AudioContext on unmount.');
+        audioContextRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
+  // Explicitly resume AudioContext on user gesture (Unmute / Activate Audio button)
+  const handleActivateAudio = async () => {
+    console.log('[App.tsx] "Unmute/Activate Audio" primary user gesture triggered.');
+    try {
+      if (audioContextRef.current) {
+        console.log('[App.tsx] Calling audioContext.resume(). Previous state was:', audioContextRef.current.state);
+        await audioContextRef.current.resume();
+        console.log('[App.tsx] audioContext.resume() completed successfully. Updated state is:', audioContextRef.current.state);
+        setAudioContextState(audioContextRef.current.state);
+      }
+      if (audioQueueRef.current) {
+        const nextState = await audioQueueRef.current.resumeAudioContext();
+        console.log('[App.tsx] audioQueue.resumeAudioContext() returned state:', nextState);
+        if (nextState !== 'unavailable') {
+          setAudioContextState(nextState);
+        }
+      }
+    } catch (err) {
+      console.error('[App.tsx] Error resuming audio context on user gesture:', err);
+    }
+  };
+
   // Initialize StreamingAudioQueue
   useEffect(() => {
     const queue = new StreamingAudioQueue(
@@ -203,6 +271,10 @@ export function App() {
         handleAudioQueueFinished();
       }
     );
+
+    if (audioContextRef.current) {
+      queue.setAudioContext(audioContextRef.current);
+    }
     audioQueueRef.current = queue;
 
     return () => {
@@ -218,6 +290,11 @@ export function App() {
       continuousVoice.stopListening();
       stopAudio();
     } else {
+      // Direct user gesture: unlock browser audio context & speech synthesis
+      try {
+        audioQueueRef.current?.unlockAudio();
+      } catch {}
+
       // Enter voice mode: automatically activate microphone and start listening
       setVoiceModeActive(true);
       setSpeakAnswers(true);
@@ -463,13 +540,20 @@ export function App() {
                   audioQueueRef.current.canEnqueueMore()
                 ) {
                   const sentenceMatch = streamingTTSBuffer.match(/([^.!?।\n]+[.!?।]+)(?:\s+|$)/);
-                  if (sentenceMatch && sentenceMatch[1]) {
-                    const sentence = sentenceMatch[1].trim();
-                    if (sentence.length >= 10 && !/^(e\.g|i\.e|mr|mrs|dr|vs)\.$/i.test(sentence)) {
-                      audioQueueRef.current.enqueueSentence(sentence);
-                      streamingTTSBuffer = streamingTTSBuffer.substring(
-                        streamingTTSBuffer.indexOf(sentenceMatch[0]) + sentenceMatch[0].length
-                      );
+                  if (sentenceMatch && sentenceMatch[0]) {
+                    const matchedFull = sentenceMatch[0];
+                    const rawSentence = sentenceMatch[1] || '';
+                    const matchIdx = streamingTTSBuffer.indexOf(matchedFull);
+                    streamingTTSBuffer = streamingTTSBuffer.substring(matchIdx + matchedFull.length);
+
+                    const cleaned = rawSentence
+                      .replace(/^#{1,6}\s+/g, '')
+                      .replace(/^\s*\d+\.\s*/g, '')
+                      .replace(/^\s*[-*+]\s*/g, '')
+                      .trim();
+
+                    if (cleaned.length >= 6 && !/^(e\.g|i\.e|mr|mrs|dr|vs)\.?$/i.test(cleaned)) {
+                      audioQueueRef.current.enqueueSentence(cleaned);
                     }
                   }
                 }
@@ -489,8 +573,12 @@ export function App() {
 
       // Stream completed: enqueue any remaining sentence fragment
       if (speakAnswers && audioQueueRef.current && audioQueueRef.current.canEnqueueMore()) {
-        const remaining = streamingTTSBuffer.trim();
-        if (remaining.length > 3) {
+        const remaining = streamingTTSBuffer
+          .replace(/^#{1,6}\s+/g, '')
+          .replace(/^\s*\d+\.\s*/g, '')
+          .replace(/^\s*[-*+]\s*/g, '')
+          .trim();
+        if (remaining.length >= 2) {
           audioQueueRef.current.enqueueSentence(remaining);
         }
       }
@@ -549,7 +637,7 @@ export function App() {
       setCurrentThinkingSteps([]);
       setCurrentSources([]);
 
-      // If audio isn't speaking (e.g. muted or completed quickly) and voice mode is active, resume listening
+      // If voice mode is active and no audio is speaking or pending, resume listening safely
       setTimeout(() => {
         if (
           voiceModeActiveRef.current &&
@@ -559,7 +647,7 @@ export function App() {
           setIsListening(true);
           continuousVoice.startListening();
         }
-      }, 500);
+      }, 1200);
     }
   };
 
@@ -663,6 +751,19 @@ export function App() {
                 <span className="text-indigo-600 font-semibold">
                   {latestLatency.tokensPerSec || 0} tok/s
                 </span>
+              </button>
+            )}
+
+            {/* Visual Unmute / Activate Audio button if AudioContext is suspended */}
+            {audioContextState === 'suspended' && (
+              <button
+                type="button"
+                onClick={handleActivateAudio}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-semibold shadow-xs transition-all animate-pulse cursor-pointer"
+                title="Browser suspended audio autoplay. Click to unmute and activate audio context"
+              >
+                <VolumeX className="w-3.5 h-3.5" />
+                <span>Unmute / Activate Audio</span>
               </button>
             )}
 
@@ -803,6 +904,8 @@ export function App() {
           audioElement={audioQueueRef.current?.getCurrentAudio()}
           micAnalyser={continuousVoice.micAnalyser}
           llmMetrics={latestLatency}
+          isAudioSuspended={audioContextState === 'suspended'}
+          onActivateAudio={handleActivateAudio}
         />
 
         {/* Floating Barge-in Audio Interrupter when speaking */}
@@ -824,6 +927,9 @@ export function App() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              try {
+                audioQueueRef.current?.unlockAudio();
+              } catch {}
               handleSend(undefined, 'text');
             }}
             className="max-w-4xl mx-auto flex items-center gap-2"
@@ -844,7 +950,12 @@ export function App() {
 
             {/* Push-to-Talk / VAD Microphone Button */}
             <VoiceRecorderButton
-              onRecordingStart={stopAudio}
+              onRecordingStart={() => {
+                try {
+                  audioQueueRef.current?.unlockAudio();
+                } catch {}
+                stopAudio();
+              }}
               onTranscriptionComplete={(transcribedText, sttMs) => {
                 handleSend(transcribedText, 'voice', sttMs);
               }}

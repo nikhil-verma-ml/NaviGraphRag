@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, Square, X, Loader2 } from 'lucide-react';
+import { apiUrl } from '../utils/api.js';
 
 interface VoiceRecorderButtonProps {
   onTranscriptionComplete: (text: string, sttMs?: number) => void;
@@ -99,7 +100,7 @@ export const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({
       const formData = new FormData();
       formData.append('file', audioBlob, `voice_query.${ext}`);
 
-      const resp = await fetch('/voice/transcribe', {
+      const resp = await fetch(apiUrl('/voice/transcribe'), {
         method: 'POST',
         body: formData,
       });
