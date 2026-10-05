@@ -27,6 +27,7 @@ interface VoiceConversationOverlayProps {
   isMuted: boolean;
   audioLevel?: number; // 0 to 100 for mic/audio reactivity
   audioElement?: HTMLAudioElement | null;
+  speechAnalyser?: AnalyserNode | null;
   micAnalyser?: AnalyserNode | null;
   llmMetrics?: LatencyMetrics;
   isAudioSuspended?: boolean;
@@ -50,6 +51,7 @@ export const VoiceConversationOverlay: React.FC<VoiceConversationOverlayProps> =
   isMuted,
   audioLevel = 0,
   audioElement,
+  speechAnalyser,
   micAnalyser,
   llmMetrics,
   isAudioSuspended = false,
@@ -246,6 +248,7 @@ export const VoiceConversationOverlay: React.FC<VoiceConversationOverlayProps> =
               <VoiceOrb
                 state={orbState}
                 audioElement={audioElement}
+                speechAnalyser={speechAnalyser}
                 micAnalyser={micAnalyser}
                 isListening={conversationState === 'LISTENING'}
                 audioLevel={audioLevel}

@@ -36,6 +36,16 @@ export function useContinuousVoice({
   const lastSpeechTimeRef = useRef<number>(0);
   const autoStopTriggeredRef = useRef(false);
 
+  const speakingStartTimeRef = useRef<number>(0);
+  const consecutiveLoudFramesRef = useRef<number>(0);
+  const prevSpeakingRef = useRef<boolean>(false);
+
+  if (!prevSpeakingRef.current && isSpeaking) {
+    speakingStartTimeRef.current = Date.now();
+    consecutiveLoudFramesRef.current = 0;
+  }
+  prevSpeakingRef.current = isSpeaking;
+
   const cleanupAudio = useCallback(() => {
     if (vadIntervalRef.current) {
       clearInterval(vadIntervalRef.current);
@@ -138,9 +148,20 @@ export function useContinuousVoice({
 
           const now = Date.now();
 
-          // Barge-in check: If AI is currently speaking and user starts talking loudly
-          if (isSpeakingRef.current && avgLevel > SPEECH_THRESHOLD + 10) {
-            onBargeInDetected();
+          // Barge-in check: If AI is currently speaking, require sustained intentional user speech (above echo level)
+          if (isSpeakingRef.current) {
+            const elapsedSpeaking = now - speakingStartTimeRef.current;
+            // Echo gating: ignore first 1000ms of speech start and require sustained loud voice
+            if (elapsedSpeaking > 1000 && avgLevel > 44) {
+              consecutiveLoudFramesRef.current++;
+              if (consecutiveLoudFramesRef.current >= 3) {
+                console.log('[useContinuousVoice] Intentional user barge-in detected. Level:', avgLevel);
+                consecutiveLoudFramesRef.current = 0;
+                onBargeInDetected();
+              }
+            } else {
+              consecutiveLoudFramesRef.current = 0;
+            }
             return;
           }
 

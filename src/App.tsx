@@ -167,15 +167,65 @@ export function App() {
     setIsListening(continuousVoice.isListening);
   }, [continuousVoice.isListening]);
 
-  // When AI finishes speaking and streaming is done, return automatically to LISTENING in Voice Mode
-  const handleAudioQueueFinished = useCallback(() => {
+  // Ref-backed stable callbacks for StreamingAudioQueue so the queue is NEVER torn down on re-renders
+  const continuousVoiceRef = useRef(continuousVoice);
+  continuousVoiceRef.current = continuousVoice;
+
+  const onPlayStateChangeRef = useRef<(playing: boolean) => void>(() => {});
+  onPlayStateChangeRef.current = (playing) => {
+    setIsSpeaking(playing);
+  };
+
+  const onFirstChunkLatencyRef = useRef<(ttsMs: number) => void>(() => {});
+  onFirstChunkLatencyRef.current = (ttsMs) => {
+    setConversation((prev) => {
+      if (prev.length === 0) return prev;
+      const lastIdx = prev.length - 1;
+      if (prev[lastIdx].role === 'assistant') {
+        const updated = [...prev];
+        updated[lastIdx] = {
+          ...updated[lastIdx],
+          latency: {
+            ...(updated[lastIdx].latency || {}),
+            ttsMs,
+          },
+        };
+        return updated;
+      }
+      return prev;
+    });
+  };
+
+  const onQueueEmptyRef = useRef<() => void>(() => {});
+  onQueueEmptyRef.current = () => {
     setIsSpeaking(false);
     if (voiceModeActiveRef.current && !isStreamingRef.current) {
       // Auto continuous conversation: return to listening mode!
       setIsListening(true);
-      continuousVoice.startListening();
+      continuousVoiceRef.current.startListening();
     }
-  }, [continuousVoice]);
+  };
+
+  // Initialize StreamingAudioQueue ONCE on mount with empty dependency array []
+  // This guarantees queue is never destroyed mid-flight on component state updates or token emissions!
+  useEffect(() => {
+    console.log('[App] Initializing singleton StreamingAudioQueue instance on mount...');
+    const queue = new StreamingAudioQueue(
+      (playing) => onPlayStateChangeRef.current(playing),
+      (ttsMs) => onFirstChunkLatencyRef.current(ttsMs),
+      () => onQueueEmptyRef.current()
+    );
+
+    if (audioContextRef.current) {
+      queue.setAudioContext(audioContextRef.current);
+    }
+    audioQueueRef.current = queue;
+
+    return () => {
+      console.log('[App] Component unmounting: stopping audio queue.');
+      queue.stop();
+    };
+  }, []);
 
   // Initialize Web Audio API context & event listener with explicit logging
   useEffect(() => {
@@ -242,45 +292,6 @@ export function App() {
       console.error('[App.tsx] Error resuming audio context on user gesture:', err);
     }
   };
-
-  // Initialize StreamingAudioQueue
-  useEffect(() => {
-    const queue = new StreamingAudioQueue(
-      (playing) => {
-        setIsSpeaking(playing);
-      },
-      (ttsMs) => {
-        setConversation((prev) => {
-          if (prev.length === 0) return prev;
-          const lastIdx = prev.length - 1;
-          if (prev[lastIdx].role === 'assistant') {
-            const updated = [...prev];
-            updated[lastIdx] = {
-              ...updated[lastIdx],
-              latency: {
-                ...(updated[lastIdx].latency || {}),
-                ttsMs,
-              },
-            };
-            return updated;
-          }
-          return prev;
-        });
-      },
-      () => {
-        handleAudioQueueFinished();
-      }
-    );
-
-    if (audioContextRef.current) {
-      queue.setAudioContext(audioContextRef.current);
-    }
-    audioQueueRef.current = queue;
-
-    return () => {
-      queue.stop();
-    };
-  }, [handleAudioQueueFinished]);
 
   // Toggle Continuous Voice Mode (ChatGPT-style voice experience)
   const toggleVoiceMode = () => {
@@ -524,6 +535,7 @@ export function App() {
                 setCurrentThinkingSteps([...stepsAccumulator]);
               } else if (eventType === 'token') {
                 const token = payload.text || '';
+                console.log('[LLM chunk]', token);
                 answerAccumulator += token;
                 streamingTTSBuffer += token;
 
@@ -553,6 +565,7 @@ export function App() {
                       .trim();
 
                     if (cleaned.length >= 6 && !/^(e\.g|i\.e|mr|mrs|dr|vs)\.?$/i.test(cleaned)) {
+                      console.log('[Sentence]', cleaned);
                       audioQueueRef.current.enqueueSentence(cleaned);
                     }
                   }
@@ -901,7 +914,8 @@ export function App() {
           onToggleMute={() => setIsVoiceMuted(!isVoiceMuted)}
           isMuted={isVoiceMuted}
           audioLevel={continuousVoice.audioLevel}
-          audioElement={audioQueueRef.current?.getCurrentAudio()}
+          audioElement={null}
+          speechAnalyser={audioQueueRef.current?.getAnalyserNode()}
           micAnalyser={continuousVoice.micAnalyser}
           llmMetrics={latestLatency}
           isAudioSuspended={audioContextState === 'suspended'}

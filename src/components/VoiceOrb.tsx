@@ -8,6 +8,8 @@ export interface VoiceOrbProps {
   state: VoiceOrbState;
   /** HTMLAudioElement playing TTS audio, connected to AnalyserNode */
   audioElement?: HTMLAudioElement | null;
+  /** Direct Web Audio API AnalyserNode connected to AudioBufferSourceNode during speech */
+  speechAnalyser?: AnalyserNode | null;
   /** Optional microphone AnalyserNode for listening reactivity */
   micAnalyser?: AnalyserNode | null;
   /** Optional boolean flag indicating listening mode */
@@ -28,6 +30,7 @@ const audioSourceCache = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNo
 export const VoiceOrb: React.FC<VoiceOrbProps> = ({
   state,
   audioElement,
+  speechAnalyser,
   micAnalyser,
   audioLevel = 0,
   className = '',
@@ -52,6 +55,9 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
 
   const micAnalyserRef = useRef<AnalyserNode | null>(micAnalyser || null);
   micAnalyserRef.current = micAnalyser || null;
+
+  const speechAnalyserRef = useRef<AnalyserNode | null>(speechAnalyser || null);
+  speechAnalyserRef.current = speechAnalyser || null;
 
   // Web Audio Context and AnalyserNode for audioElement
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -140,7 +146,7 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
       // 1. CALCULATE REAL-TIME AUDIO FREQUENCY DATA & VOLUME
       // ─────────────────────────────────────────────────────────────────────────
       if (currentState === 'speaking') {
-        const analyser = analyserNodeRef.current;
+        const analyser = speechAnalyserRef.current || analyserNodeRef.current;
         if (analyser) {
           analyser.getByteFrequencyData(freqData);
 

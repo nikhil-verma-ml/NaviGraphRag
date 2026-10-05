@@ -1,29 +1,42 @@
 /**
- * StreamingAudioQueue handles real-time streaming TTS:
- * Converts text into speech progressively as sentences complete,
- * while the LLM is still generating subsequent tokens.
- * Supports interruption (barge-in), cancellation, and gapless sequential playback.
+ * StreamingAudioQueue handles real-time streaming TTS using Web Audio API:
+ * 1. enqueueSentence() -> Fetches TTS audio from /voice/tts
+ * 2. Decodes ArrayBuffer -> AudioBuffer via AudioContext.decodeAudioData()
+ * 3. Queues AudioBuffer for gapless sequential playback
+ * 4. Plays via AudioBufferSourceNode connected to masterGain & analyserNode
+ * 5. Supports intentional user barge-in interruption without accidental aborts
  */
 
 import { apiUrl } from './api.js';
 
+export interface QueueItem {
+  buffer: AudioBuffer;
+  text: string;
+}
+
 export class StreamingAudioQueue {
-  private queue: { audio?: HTMLAudioElement; url?: string; text?: string }[] = [];
-  private currentAudio: HTMLAudioElement | null = null;
-  private currentUrl: string | null = null;
+  private queue: QueueItem[] = [];
+  private audioContext: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
+  private analyserNode: AnalyserNode | null = null;
+  private currentSource: AudioBufferSourceNode | null = null;
+
   private isCancelled = false;
-  private abortControllers: AbortController[] = [];
+  private isPlaying = false;
+  private activeControllers = new Set<AbortController>();
+
   private onPlayStateChange?: (isPlaying: boolean) => void;
   private onFirstChunkLatency?: (latencyMs: number) => void;
   private onQueueEmpty?: () => void;
-  private isProcessing = false;
+
   private enqueuedSentencesCount = 0;
   private pendingFetchesCount = 0;
   private maxSentencesToSpeak = 100;
   private hasReportedFirstChunkLatency = false;
+
+  // Web Speech API fallback in case decodeAudioData or TTS fails
   private isWebSpeechActive = false;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
-  private unlockedContext: AudioContext | null = null;
 
   constructor(
     onPlayStateChange?: (isPlaying: boolean) => void,
@@ -39,117 +52,114 @@ export class StreamingAudioQueue {
     this.onQueueEmpty = callback;
   }
 
+  /**
+   * Sets or attaches the shared Web Audio API AudioContext.
+   * Initializes master GainNode and AnalyserNode.
+   */
   public setAudioContext(ctx: AudioContext | null) {
-    this.unlockedContext = ctx;
-    console.log('[StreamingAudioQueue] Associated with AudioContext. State:', ctx ? ctx.state : 'null');
+    if (!ctx) return;
+    this.audioContext = ctx;
+    this.ensureAudioGraph();
+    console.log('[StreamingAudioQueue] Associated with AudioContext. State:', ctx.state);
   }
 
   public getAudioContext(): AudioContext | null {
-    return this.unlockedContext;
+    return this.audioContext;
+  }
+
+  public getAnalyserNode(): AnalyserNode | null {
+    return this.analyserNode;
   }
 
   public getAudioContextState(): AudioContextState | 'unavailable' {
-    return this.unlockedContext ? this.unlockedContext.state : 'unavailable';
+    return this.audioContext ? this.audioContext.state : 'unavailable';
+  }
+
+  private ensureAudioGraph() {
+    if (!this.audioContext) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        this.audioContext = new AudioCtx();
+      }
+    }
+    if (!this.audioContext) return;
+
+    if (!this.masterGain) {
+      this.masterGain = this.audioContext.createGain();
+      this.masterGain.gain.value = 1.0;
+      this.masterGain.connect(this.audioContext.destination);
+    }
+
+    if (!this.analyserNode) {
+      this.analyserNode = this.audioContext.createAnalyser();
+      this.analyserNode.fftSize = 256;
+      this.analyserNode.smoothingTimeConstant = 0.8;
+      this.analyserNode.connect(this.masterGain);
+    }
   }
 
   /**
-   * Explicitly resumes the Web Audio API context on user gesture.
+   * Primary user gesture audio context unlock:
+   * Explicitly resumes AudioContext if suspended.
    */
-  public async resumeAudioContext(): Promise<AudioContextState | 'unavailable'> {
-    console.log('[StreamingAudioQueue.resumeAudioContext] Attempting to resume AudioContext...');
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) {
-      console.warn('[StreamingAudioQueue.resumeAudioContext] AudioContext is not supported in this environment.');
-      return 'unavailable';
-    }
+  public async unlockAudio(): Promise<void> {
+    console.log('[StreamingAudioQueue.unlockAudio] Unlocking audio context...');
+    this.ensureAudioGraph();
+    if (!this.audioContext) return;
 
-    if (!this.unlockedContext || this.unlockedContext.state === 'closed') {
-      this.unlockedContext = new AudioCtx();
-      console.log('[StreamingAudioQueue.resumeAudioContext] Created new AudioContext instance. Initial state:', this.unlockedContext.state);
-    }
-
-    console.log('[StreamingAudioQueue.resumeAudioContext] Pre-resume state:', this.unlockedContext.state);
-    if (this.unlockedContext.state === 'suspended') {
-      try {
-        await this.unlockedContext.resume();
-        console.log('[StreamingAudioQueue.resumeAudioContext] Successfully resumed. Post-resume state:', this.unlockedContext.state);
-      } catch (err) {
-        console.error('[StreamingAudioQueue.resumeAudioContext] Failed to resume AudioContext:', err);
+    try {
+      if (this.audioContext.state !== 'running') {
+        console.log('[StreamingAudioQueue.unlockAudio] AudioContext state is', this.audioContext.state, '- calling resume()...');
+        await this.audioContext.resume();
+        console.log('[StreamingAudioQueue.unlockAudio] AudioContext resumed. New state:', this.audioContext.state);
       }
-    } else {
-      console.log('[StreamingAudioQueue.resumeAudioContext] AudioContext is already in non-suspended state:', this.unlockedContext.state);
+
+      // Play 10ms inaudible buffer to satisfy browser activation token
+      const osc = this.audioContext.createOscillator();
+      const gain = this.audioContext.createGain();
+      gain.gain.value = 0.0001;
+      osc.connect(gain);
+      gain.connect(this.audioContext.destination);
+      osc.start();
+      osc.stop(this.audioContext.currentTime + 0.01);
+
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.resume();
+      }
+    } catch (err) {
+      console.warn('[StreamingAudioQueue.unlockAudio] Unlock notice:', err);
+    }
+  }
+
+  public async resumeAudioContext(): Promise<AudioContextState | 'unavailable'> {
+    console.log('[StreamingAudioQueue.resumeAudioContext] Resuming AudioContext...');
+    this.ensureAudioGraph();
+    if (!this.audioContext) return 'unavailable';
+
+    if (this.audioContext.state === 'suspended') {
+      try {
+        await this.audioContext.resume();
+        console.log('[StreamingAudioQueue.resumeAudioContext] Resumed successfully. State is:', this.audioContext.state);
+      } catch (err) {
+        console.error('[StreamingAudioQueue.resumeAudioContext] Error during resume():', err);
+      }
     }
 
-    // Also prime speech synthesis
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.resume();
-        console.log('[StreamingAudioQueue.resumeAudioContext] SpeechSynthesis resumed.');
-      } catch (e) {
-        console.warn('[StreamingAudioQueue.resumeAudioContext] SpeechSynthesis resume notice:', e);
-      }
+      } catch {}
     }
 
-    return this.unlockedContext.state;
-  }
-
-  public getCurrentAudio(): HTMLAudioElement | null {
-    return this.currentAudio;
+    return this.audioContext.state;
   }
 
   public reset() {
-    this.stop();
+    console.log('[StreamingAudioQueue.reset] Resetting queue for new conversation turn (without cancelling abort controllers).');
     this.isCancelled = false;
     this.enqueuedSentencesCount = 0;
     this.pendingFetchesCount = 0;
     this.hasReportedFirstChunkLatency = false;
-  }
-
-  /**
-   * Browser Autoplay Policy Unlock:
-   * Must be triggered directly within user gestures (button click, mic tap, submit).
-   * Unlocks Web Audio, HTML5 Audio, and Web Speech API.
-   */
-  public unlockAudio() {
-    console.log('[StreamingAudioQueue.unlockAudio] Invoking unlock routine...');
-    try {
-      // 1. Unlock Web Audio API context
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        if (!this.unlockedContext || this.unlockedContext.state === 'closed') {
-          this.unlockedContext = new AudioCtx();
-        }
-        console.log('[StreamingAudioQueue.unlockAudio] Current AudioContext state:', this.unlockedContext.state);
-        if (this.unlockedContext.state === 'suspended') {
-          this.unlockedContext.resume().then(() => {
-            console.log('[StreamingAudioQueue.unlockAudio] AudioContext resumed asynchronously. New state:', this.unlockedContext?.state);
-          }).catch((err) => {
-            console.warn('[StreamingAudioQueue.unlockAudio] Failed to resume AudioContext:', err);
-          });
-        }
-        // Play an inaudible 10ms micro-beep to permanently satisfy browser activation
-        const osc = this.unlockedContext.createOscillator();
-        const gain = this.unlockedContext.createGain();
-        gain.gain.value = 0.0001;
-        osc.connect(gain);
-        gain.connect(this.unlockedContext.destination);
-        osc.start();
-        osc.stop(this.unlockedContext.currentTime + 0.01);
-      }
-
-      // 2. Unlock HTML5 Audio
-      const silentAudio = new Audio(
-        'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
-      );
-      silentAudio.play().catch(() => {});
-
-      // 3. Resume SpeechSynthesis
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.resume();
-      }
-    } catch (e) {
-      console.warn('[StreamingAudioQueue.unlockAudio] Notice:', e);
-    }
   }
 
   public getEnqueuedCount(): number {
@@ -160,9 +170,6 @@ export class StreamingAudioQueue {
     return !this.isCancelled && this.enqueuedSentencesCount < this.maxSentencesToSpeak;
   }
 
-  /**
-   * Strips markdown artifacts, bullets, and citations so spoken audio sounds conversational.
-   */
   private cleanTextForSpeech(text: string): string {
     return text
       .replace(/```[\s\S]*?```/g, ' ')
@@ -176,23 +183,22 @@ export class StreamingAudioQueue {
       .replace(/^#{1,6}\s+/gm, '')
       .replace(/(\*\*|__)(.*?)\1/g, '$2')
       .replace(/(\*|_)(.*?)\1/g, '$2')
-      .replace(/^\s*\d+\.\s+/gm, '') // Remove list numbers like "1. "
-      .replace(/^[\s*+-]+\s+/gm, '') // Remove bullet dashes
+      .replace(/^\s*\d+\.\s+/gm, '')
+      .replace(/^[\s*+-]+\s+/gm, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
   /**
-   * Enqueues a single sentence for immediate or queued playback.
-   * Includes explicit verification logging for AudioContext state and audio buffer reception.
+   * Pipeline Step 1 & 2: Enqueue text sentence and initiate TTS network request.
    */
   public async enqueueSentence(sentence: string, preferredVoice?: string): Promise<void> {
     if (this.isCancelled) {
-      console.log('[StreamingAudioQueue.enqueueSentence] Skipped: queue is cancelled.');
+      console.log('[StreamingAudioQueue.enqueueSentence] Skipped: queue is currently cancelled.');
       return;
     }
     if (this.enqueuedSentencesCount >= this.maxSentencesToSpeak) {
-      console.log('[StreamingAudioQueue.enqueueSentence] Skipped: maximum sentence threshold reached.');
+      console.log('[StreamingAudioQueue.enqueueSentence] Skipped: sentence threshold reached.');
       return;
     }
 
@@ -202,37 +208,44 @@ export class StreamingAudioQueue {
       return;
     }
 
-    const ctxState = this.unlockedContext ? this.unlockedContext.state : 'uninitialized';
-    console.log('[StreamingAudioQueue.enqueueSentence] ENQUEUING SENTENCE:', {
+    this.ensureAudioGraph();
+    const ctxState = this.audioContext ? this.audioContext.state : 'uninitialized';
+
+    // Step [1]: enqueueSentence called - track pipeline state
+    console.log('[StreamingAudioQueue.enqueueSentence] Pipeline state:', {
       text: cleaned,
       rawLength: sentence.length,
       cleanedLength: cleaned.length,
       audioContextState: ctxState,
-      isAudioContextSuspended: ctxState === 'suspended',
+      isSuspended: ctxState === 'suspended',
       enqueuedCount: this.enqueuedSentencesCount + 1,
+      queueDepth: this.queue.length,
+      isPlaying: this.isPlaying,
+      pendingFetches: this.pendingFetchesCount + 1,
     });
 
     if (ctxState === 'suspended') {
-      console.warn('[StreamingAudioQueue.enqueueSentence] WARNING: AudioContext is currently in "suspended" state! Browser may block audio playback until user clicks "Unmute/Activate Audio".');
+      console.warn('[StreamingAudioQueue] Notice: AudioContext is currently suspended. Audio will play once resumed.');
+      // Attempt auto-resume
+      this.audioContext?.resume().catch(() => {});
     }
 
     this.enqueuedSentencesCount++;
     this.pendingFetchesCount++;
 
-    // Mark as playing immediately so UI transitions to SPEAKING right away
-    if (!this.isProcessing) {
-      this.isProcessing = true;
+    if (!this.isPlaying) {
       this.onPlayStateChange?.(true);
     }
 
+    // Step [2]: TTS request started with isolated per-request AbortController
     const controller = new AbortController();
-    this.abortControllers.push(controller);
+    this.activeControllers.add(controller);
 
     const ttsStart = Date.now();
-    try {
-      const endpoint = apiUrl('/voice/tts');
-      console.log(`[StreamingAudioQueue.enqueueSentence] Sending TTS request to: ${endpoint}`, { text: cleaned, voice: preferredVoice });
+    const endpoint = apiUrl('/voice/tts');
+    console.log(`[2] TTS request started: URL="${endpoint}" text="${cleaned.slice(0, 50)}..."`);
 
+    try {
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -240,12 +253,28 @@ export class StreamingAudioQueue {
         signal: controller.signal,
       });
 
-      console.log(`[StreamingAudioQueue.enqueueSentence] TTS HTTP response status: ${resp.status} ${resp.statusText}`);
+      // Step [3]: TTS response verification
+      const contentType = resp.headers.get('content-type') || 'unknown';
+      const contentLength = resp.headers.get('content-length') || 'unknown';
+      console.log('[StreamingAudioQueue.fetch] Response received:', {
+        status: resp.status,
+        statusText: resp.statusText,
+        contentType,
+        contentLength,
+        url: endpoint,
+        isAudioType: contentType.includes('audio') || contentType.includes('mpeg') || contentType.includes('wav'),
+      });
 
-      if (!resp.ok || this.isCancelled) {
-        console.warn(`[StreamingAudioQueue.enqueueSentence] /voice/tts responded with status ${resp.status}. Falling back to browser Web Speech API for this sentence.`);
-        this.queue.push({ text: cleaned });
-        this.processQueue();
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => '');
+        console.error(`[StreamingAudioQueue.fetch] TTS API returned HTTP error ${resp.status}:`, errorText);
+        // Fallback to Web Speech API
+        this.fallbackWebSpeech(cleaned);
+        return;
+      }
+
+      if (this.isCancelled) {
+        console.log('[StreamingAudioQueue.fetch] Discarding response: queue was cancelled during fetch.');
         return;
       }
 
@@ -256,178 +285,220 @@ export class StreamingAudioQueue {
         this.onFirstChunkLatency?.(measuredMs);
       }
 
-      const blob = await resp.blob();
-      if (this.isCancelled) {
-        console.log('[StreamingAudioQueue.enqueueSentence] Discarding audio blob because queue was cancelled.');
+      // Step [4]: Audio bytes received & length validation
+      const arrayBuffer = await resp.arrayBuffer();
+      const byteLength = arrayBuffer.byteLength;
+      console.log('[StreamingAudioQueue.fetch] Audio payload verified:', {
+        bytesReceived: byteLength,
+        isNonEmpty: byteLength > 0,
+        meetsMinimumAudioSize: byteLength > 200,
+        expectedLength: contentLength,
+      });
+
+      if (byteLength === 0) {
+        console.warn('[StreamingAudioQueue.fetch] Response body is completely empty (0 bytes). Falling back to Web Speech API.');
+        this.fallbackWebSpeech(cleaned);
         return;
       }
 
-      console.log(`[StreamingAudioQueue.enqueueSentence] Audio buffer verification: Received Blob of ${blob.size} bytes (type: ${blob.type || 'unknown'}).`);
-
-      // If the backend returned an actual audio payload (> 200 bytes)
-      if (blob.size > 200) {
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        console.log(`[StreamingAudioQueue.enqueueSentence] Audio element created with object URL. Queueing for playback. AudioContext state: ${this.unlockedContext?.state}`);
-        this.queue.push({ audio, url, text: cleaned });
-      } else {
-        console.warn(`[StreamingAudioQueue.enqueueSentence] Audio blob is suspiciously small (${blob.size} bytes). Falling back to Web Speech API.`);
-        this.queue.push({ text: cleaned });
+      // Step [5]: Web Audio API decode status check
+      if (!this.audioContext) {
+        this.ensureAudioGraph();
       }
 
-      this.processQueue();
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.warn('[StreamingAudioQueue.enqueueSentence] Fetch error:', err, 'Falling back to Web Speech API.');
-        if (!this.isCancelled) {
-          this.queue.push({ text: cleaned });
-          this.processQueue();
+      if (this.audioContext) {
+        console.log('[StreamingAudioQueue.fetch] Starting decodeAudioData()... AudioContext state:', this.audioContext.state);
+        try {
+          // Decode a slice copy to avoid detachment issues
+          const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer.slice(0));
+          console.log('[StreamingAudioQueue.fetch] Audio successfully decoded:', {
+            durationSeconds: Number(audioBuffer.duration.toFixed(3)),
+            numberOfChannels: audioBuffer.numberOfChannels,
+            sampleRateHz: audioBuffer.sampleRate,
+            isValidDuration: audioBuffer.duration > 0,
+          });
+
+          if (this.isCancelled) {
+            console.log('[StreamingAudioQueue.fetch] Queue cancelled during decode. Discarding audio buffer.');
+            return;
+          }
+
+          // Step [6]: Audio buffer queued for playback
+          console.log('[StreamingAudioQueue.fetch] Enqueuing decoded buffer before playback:', {
+            textPreview: cleaned.slice(0, 40) + '...',
+            duration: audioBuffer.duration,
+            currentQueueDepth: this.queue.length + 1,
+            isPlaying: this.isPlaying,
+          });
+          this.queue.push({ buffer: audioBuffer, text: cleaned });
+          this.playNext();
+        } catch (decodeErr) {
+          console.error('[StreamingAudioQueue.fetch] AudioContext.decodeAudioData failed to decode bytes:', decodeErr);
+          this.fallbackWebSpeech(cleaned);
         }
       } else {
-        console.log('[StreamingAudioQueue.enqueueSentence] TTS fetch aborted via controller.');
+        console.warn('[StreamingAudioQueue.fetch] No AudioContext available for decoding, falling back to Web Speech.');
+        this.fallbackWebSpeech(cleaned);
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log('[StreamingAudioQueue.enqueueSentence] TTS intentionally aborted via controller.');
+      } else {
+        console.error('[StreamingAudioQueue.enqueueSentence] Unexpected TTS fetch error:', err);
+        if (!this.isCancelled) {
+          this.fallbackWebSpeech(cleaned);
+        }
       }
     } finally {
+      this.activeControllers.delete(controller);
       this.pendingFetchesCount = Math.max(0, this.pendingFetchesCount - 1);
-      if (this.queue.length === 0 && !this.currentAudio && !this.isWebSpeechActive && this.pendingFetchesCount === 0) {
-        this.isProcessing = false;
-        this.onPlayStateChange?.(false);
-        this.onQueueEmpty?.();
-      }
+      this.checkCompletion();
     }
   }
 
-  private processQueue() {
+  /**
+   * Step [7], [8], [9]: Sequential playback of queued AudioBuffers via AudioBufferSourceNode.
+   */
+  private playNext() {
     if (this.isCancelled) {
-      console.log('[StreamingAudioQueue.processQueue] Stopped: queue is cancelled.');
+      console.log('[StreamingAudioQueue.playNext] Cancelled, halting playback.');
       return;
     }
-    if (this.currentAudio || this.isWebSpeechActive) {
-      console.log('[StreamingAudioQueue.processQueue] Playback currently in progress. Queued items count:', this.queue.length);
+    if (this.isPlaying) {
+      console.log(`[StreamingAudioQueue.playNext] Already playing a chunk. Queue depth: ${this.queue.length}`);
       return;
     }
-
     if (this.queue.length === 0) {
-      if (this.pendingFetchesCount === 0 && this.isProcessing) {
-        console.log('[StreamingAudioQueue.processQueue] Queue is completely empty and no pending fetches remain.');
-        this.isProcessing = false;
-        this.onPlayStateChange?.(false);
-        this.onQueueEmpty?.();
-      }
+      console.log('[StreamingAudioQueue.playNext] Queue is empty.');
+      this.checkCompletion();
       return;
     }
 
     const next = this.queue.shift()!;
+    this.isPlaying = true;
+    this.onPlayStateChange?.(true);
 
-    if (!this.isProcessing) {
-      this.isProcessing = true;
-      this.onPlayStateChange?.(true);
-    }
-
-    // Audio element playback
-    if (next.audio && next.url) {
-      this.currentAudio = next.audio;
-      this.currentUrl = next.url;
-
-      console.log(`[StreamingAudioQueue] Starting audio playback for sentence: "${next.text?.slice(0, 40)}...". AudioContext state: ${this.unlockedContext?.state}`);
-
-      this.currentAudio.onended = () => {
-        console.log('[StreamingAudioQueue] Audio element playback finished.');
-        if (this.currentUrl) {
-          URL.revokeObjectURL(this.currentUrl);
-        }
-        this.currentAudio = null;
-        this.currentUrl = null;
-        this.processQueue();
-      };
-
-      this.currentAudio.onerror = (e) => {
-        console.warn('[StreamingAudioQueue] Audio element error encountered, falling back to Web Speech:', e);
-        if (this.currentUrl) {
-          URL.revokeObjectURL(this.currentUrl);
-        }
-        this.currentAudio = null;
-        this.currentUrl = null;
-        if (next.text) {
-          this.speakWebSpeech(next.text);
-        } else {
-          this.processQueue();
-        }
-      };
-
-      this.currentAudio.play().catch((err) => {
-        console.warn('[StreamingAudioQueue] audio.play() was blocked or rejected (AudioContext state: ' + this.unlockedContext?.state + '). Error:', err);
-        console.warn('[StreamingAudioQueue] Falling back to Web Speech API synthesis.');
-        if (this.currentUrl) {
-          URL.revokeObjectURL(this.currentUrl);
-        }
-        this.currentAudio = null;
-        this.currentUrl = null;
-        if (next.text) {
-          this.speakWebSpeech(next.text);
-        } else {
-          this.processQueue();
-        }
-      });
-    } else if (next.text) {
-      // Web Speech API fallback
-      console.log('[StreamingAudioQueue] Initiating Web Speech API fallback playback.');
-      this.speakWebSpeech(next.text);
-    }
-  }
-
-  private speakWebSpeech(text: string) {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      console.warn('[StreamingAudioQueue.speakWebSpeech] SpeechSynthesis is unavailable.');
-      this.processQueue();
+    this.ensureAudioGraph();
+    if (!this.audioContext || !this.analyserNode) {
+      console.error('[StreamingAudioQueue.playNext] Missing AudioContext or graph nodes.');
+      this.isPlaying = false;
+      this.checkCompletion();
       return;
     }
 
     try {
-      this.isWebSpeechActive = true;
-      if (!this.isProcessing) {
-        this.isProcessing = true;
-        this.onPlayStateChange?.(true);
+      // Step [7]: playNext called
+      console.log(`[7] playNext called for sentence: "${next.text.slice(0, 40)}...". Remaining queue: ${this.queue.length}`);
+
+      // Resume context if suspended
+      if (this.audioContext.state === 'suspended') {
+        console.log('[StreamingAudioQueue.playNext] AudioContext suspended, calling resume()...');
+        this.audioContext.resume().catch(() => {});
       }
 
-      // Resume in case browser suspended speech
+      // Step [8]: AudioBufferSource created and connected to destination
+      const source = this.audioContext.createBufferSource();
+      source.buffer = next.buffer;
+      source.connect(this.analyserNode);
+      this.currentSource = source;
+      console.log('[8] AudioBufferSource created and connected to analyserNode -> masterGain -> destination');
+
+      // Step [9]: source.start(0) called
+      console.log('Starting audio playback', {
+        contextState: this.audioContext.state,
+        duration: next.buffer.duration,
+      });
+      console.log('[9] source.start(0) called');
+      source.start(0);
+
+      source.onended = () => {
+        console.log(`[StreamingAudioQueue] Finished playback for: "${next.text.slice(0, 40)}..."`);
+        if (this.currentSource === source) {
+          this.currentSource = null;
+        }
+        this.isPlaying = false;
+        // Proceed directly to next queued sentence
+        this.playNext();
+      };
+    } catch (playErr) {
+      console.error('[StreamingAudioQueue.playNext] Failed to start AudioBufferSourceNode:', playErr);
+      this.currentSource = null;
+      this.isPlaying = false;
+      this.playNext();
+    }
+  }
+
+  private fallbackWebSpeech(text: string) {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      console.log(`[StreamingAudioQueue] Speaking via Web Speech API fallback: "${text.slice(0, 40)}..."`);
       window.speechSynthesis.resume();
+      this.isWebSpeechActive = true;
+      this.isPlaying = true;
+      this.onPlayStateChange?.(true);
 
       const utterance = new SpeechSynthesisUtterance(text);
-      // Persist reference on instance so Chromium GC does not free it mid-speech!
       this.currentUtterance = utterance;
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
 
       utterance.onend = () => {
-        console.log('[StreamingAudioQueue.speakWebSpeech] Utterance finished playing.');
+        console.log('[StreamingAudioQueue] Web Speech utterance completed.');
         this.currentUtterance = null;
         this.isWebSpeechActive = false;
-        this.processQueue();
+        this.isPlaying = false;
+        this.playNext();
       };
 
-      utterance.onerror = (e) => {
-        console.warn('[StreamingAudioQueue.speakWebSpeech] Utterance error:', e);
+      utterance.onerror = () => {
         this.currentUtterance = null;
         this.isWebSpeechActive = false;
-        this.processQueue();
+        this.isPlaying = false;
+        this.playNext();
       };
 
-      console.log(`[StreamingAudioQueue.speakWebSpeech] Speaking utterance: "${text.slice(0, 40)}..."`);
       window.speechSynthesis.speak(utterance);
     } catch (e) {
-      console.warn('[StreamingAudioQueue.speakWebSpeech] Exception during speak():', e);
-      this.currentUtterance = null;
       this.isWebSpeechActive = false;
-      this.processQueue();
+      this.isPlaying = false;
+      this.checkCompletion();
+    }
+  }
+
+  private checkCompletion() {
+    if (
+      this.queue.length === 0 &&
+      !this.isPlaying &&
+      !this.isWebSpeechActive &&
+      this.pendingFetchesCount === 0
+    ) {
+      console.log('[StreamingAudioQueue] Queue finished: all sentences played.');
+      this.onPlayStateChange?.(false);
+      this.onQueueEmpty?.();
     }
   }
 
   /**
-   * Immediately stops speech, clears queue, cancels pending fetches (Barge-in).
+   * Stops playback, clears queue, and aborts active TTS fetches (User Barge-in / Exit).
+   * Diagnostic console.trace identifies the exact caller to prevent accidental stops.
    */
   public stop() {
-    console.log('[StreamingAudioQueue.stop] Interruption requested. Halting all playback and aborting fetches.');
+    console.trace('[StreamingAudioQueue.stop] called by:');
+    console.log('[StreamingAudioQueue.stop] Interruption requested. Halting all playback and aborting fetches.', {
+      hadCurrentSource: !!this.currentSource,
+      queueLength: this.queue.length,
+      activeFetchesCount: this.activeControllers.size,
+    });
     this.isCancelled = true;
+
+    // Stop current Web Audio buffer source
+    if (this.currentSource) {
+      try {
+        this.currentSource.stop(0);
+        this.currentSource.disconnect();
+      } catch {}
+      this.currentSource = null;
+    }
 
     // Cancel Web Speech API
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -438,50 +509,24 @@ export class StreamingAudioQueue {
     this.isWebSpeechActive = false;
     this.currentUtterance = null;
 
-    // Abort all in-flight TTS fetches
-    for (const c of this.abortControllers) {
+    // Abort active in-flight TTS fetches
+    for (const c of this.activeControllers) {
       try {
         c.abort();
       } catch {}
     }
-    this.abortControllers = [];
+    this.activeControllers.clear();
     this.pendingFetchesCount = 0;
 
-    // Stop and cleanup current audio
-    if (this.currentAudio) {
-      try {
-        this.currentAudio.pause();
-        this.currentAudio.src = '';
-      } catch {}
-      this.currentAudio = null;
-    }
-    if (this.currentUrl) {
-      try {
-        URL.revokeObjectURL(this.currentUrl);
-      } catch {}
-      this.currentUrl = null;
-    }
-
-    // Cleanup queued audios
-    for (const item of this.queue) {
-      if (item.url) {
-        try {
-          URL.revokeObjectURL(item.url);
-        } catch {}
-      }
-    }
+    // Clear queue
     this.queue = [];
-
-    if (this.isProcessing) {
-      this.isProcessing = false;
-      this.onPlayStateChange?.(false);
-    }
+    this.isPlaying = false;
+    this.onPlayStateChange?.(false);
   }
 
   public isSpeaking(): boolean {
     return (
-      this.isProcessing ||
-      this.currentAudio !== null ||
+      this.isPlaying ||
       this.isWebSpeechActive ||
       this.queue.length > 0 ||
       this.pendingFetchesCount > 0
