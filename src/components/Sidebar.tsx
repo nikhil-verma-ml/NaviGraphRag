@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Plus, Trash2, Upload, FileText, CheckCircle2, AlertCircle, Loader2, MessageSquare, Filter, Layers } from 'lucide-react';
 import { SessionInfo, DocumentItem } from '../types.js';
+import { apiUrl } from '../utils/api.js';
 
 interface SidebarProps {
   sessions: SessionInfo[];
@@ -49,7 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
 
     try {
-      const resp = await fetch('/upload', {
+      const resp = await fetch(apiUrl('/upload'), {
         method: 'POST',
         body: formData,
       });

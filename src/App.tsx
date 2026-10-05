@@ -30,6 +30,7 @@ import {
 } from './types.js';
 import { StreamingAudioQueue } from './utils/streamingAudioQueue.js';
 import { useContinuousVoice } from './utils/useContinuousVoice.js';
+import { apiUrl } from './utils/api.js';
 
 export function App() {
   const [threadId, setThreadId] = useState<string>(() => {
@@ -248,7 +249,7 @@ export function App() {
   // Fetch session list
   const loadSessions = async () => {
     try {
-      const resp = await fetch('/sessions');
+      const resp = await fetch(apiUrl('/sessions'));
       if (resp.ok) {
         const data = await resp.json();
         setSessions(data.sessions || []);
@@ -261,7 +262,7 @@ export function App() {
   // Fetch indexed documents list for Multi-PDF support
   const loadDocuments = async () => {
     try {
-      const resp = await fetch('/api/documents');
+      const resp = await fetch(apiUrl('/api/documents'));
       if (resp.ok) {
         const data = await resp.json();
         setIndexedDocuments(data.documents || []);
@@ -276,7 +277,7 @@ export function App() {
     stopAudio();
     setThreadId(tid);
     try {
-      const resp = await fetch(`/sessions/${tid}/messages`);
+      const resp = await fetch(apiUrl(`/sessions/${tid}/messages`));
       if (resp.ok) {
         const data = await resp.json();
         const mapped = (data.messages || []).map((m: any, idx: number) => ({
@@ -322,7 +323,7 @@ export function App() {
   // Delete session
   const handleDeleteSession = async (tid: string) => {
     try {
-      await fetch(`/sessions/${tid}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/sessions/${tid}`), { method: 'DELETE' });
       setSessions((prev) => prev.filter((s) => s.thread_id !== tid));
       if (threadId === tid) {
         handleNewSession();
@@ -394,7 +395,7 @@ export function App() {
     let streamingTTSBuffer = '';
 
     try {
-      const response = await fetch('/chat/stream', {
+      const response = await fetch(apiUrl('/chat/stream'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { apiUrl } from './api.js';
 
 interface ContinuousVoiceOptions {
   onSpeechTranscribed: (text: string, sttMs?: number) => void;
@@ -64,7 +65,7 @@ export function useContinuousVoice({
       const formData = new FormData();
       formData.append('file', audioBlob, `voice_stream.${ext}`);
 
-      const resp = await fetch('/voice/transcribe', {
+      const resp = await fetch(apiUrl('/voice/transcribe'), {
         method: 'POST',
         body: formData,
       });

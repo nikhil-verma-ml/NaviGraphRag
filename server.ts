@@ -21,8 +21,39 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = '0.0.0.0';
 
-app.use(cors());
+// Permissive CORS configuration supporting https://navigraphai.vercel.app and preview domains
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        origin.includes('navigraphai.vercel.app') ||
+        origin.includes('navigraph-api.vercel.app') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1') ||
+        origin.endsWith('.vercel.app')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    exposedHeaders: ['X-TTS-Latency-Ms'],
+  })
+);
 app.use(express.json());
+
+// Healthcheck endpoint for frontend connection verification
+app.get(['/health', '/api/health'], (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'NaviGraph API Gateway',
+    timestamp: new Date().toISOString(),
+    frontendAllowed: 'https://navigraphai.vercel.app',
+  });
+});
 
 // Setup Multer for document uploads
 const uploadDir = path.join(__dirname, 'data', 'raw');

@@ -5,6 +5,8 @@
  * Supports interruption (barge-in), cancellation, and gapless sequential playback.
  */
 
+import { apiUrl } from './api.js';
+
 export class StreamingAudioQueue {
   private queue: { audio?: HTMLAudioElement; url?: string; text?: string }[] = [];
   private currentAudio: HTMLAudioElement | null = null;
@@ -81,7 +83,7 @@ export class StreamingAudioQueue {
 
     const ttsStart = Date.now();
     try {
-      const resp = await fetch('/voice/tts', {
+      const resp = await fetch(apiUrl('/voice/tts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: trimmed, voice: preferredVoice }),

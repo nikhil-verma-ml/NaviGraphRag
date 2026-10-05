@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, FileText, ExternalLink, Loader2 } from 'lucide-react';
 import { Source } from '../types.js';
+import { apiUrl } from '../utils/api.js';
 
 interface DocumentPreviewModalProps {
   source: Source | null;
@@ -25,7 +26,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ sour
     // For non-pdf files (text, markdown, seed), fetch content
     setLoading(true);
     setError(null);
-    fetch(`/api/documents/${encodeURIComponent(source.source)}/view`)
+    fetch(apiUrl(`/api/documents/${encodeURIComponent(source.source)}/view`))
       .then((res) => {
         if (!res.ok) throw new Error('Document preview unavailable');
         return res.json();
@@ -46,7 +47,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ sour
   const fileName = source.source || source.title || 'Document';
   const pageNum = source.pageNumber || 1;
   const isPdf = fileName.toLowerCase().endsWith('.pdf');
-  const pdfViewUrl = `/api/documents/${encodeURIComponent(fileName)}/view#page=${pageNum}`;
+  const pdfViewUrl = apiUrl(`/api/documents/${encodeURIComponent(fileName)}/view#page=${pageNum}`);
 
   return (
     <div

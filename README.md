@@ -1,253 +1,237 @@
-# NaviGraph — Agentic RAG System
+# NaviGraph — Voice-First Agentic RAG System
 
-A production-ready **Agentic RAG (Retrieval-Augmented Generation)** system built with LangGraph, FastAPI, and Streamlit. Unlike traditional RAG pipelines that follow a fixed retrieve → evaluate → generate sequence, NaviGraph uses a single autonomous agent that decides at runtime whether to search, which tool to use, how many times, and when it has enough information to answer — all driven by the ReAct reasoning loop.
+[![Frontend Status](https://img.shields.io/badge/Frontend-https%3A%2F%2Fnavigraphai.vercel.app-blue)](https://navigraphai.vercel.app/)
+[![Backend Status](https://img.shields.io/badge/Backend-https%3A%2F%2Fnavigraph--api.vercel.app-emerald)](https://navigraph-api.vercel.app/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19.0-61dafb?logo=react)](https://react.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-4.0-38bdf8?logo=tailwindcss)](https://tailwindcss.com/)
+[![Recharts](https://img.shields.io/badge/Recharts-2.x-22c55e)](https://recharts.org/)
 
----
-
-## Why Agentic RAG — Not CRAG or Self-RAG
-
-Traditional CRAG and Self-RAG architectures introduce separate evaluator/critic nodes that sit alongside the agent and grade retrieval quality. This creates a contradiction: if the agent already commits to a retrieval source upfront, the evaluator's judgment becomes redundant, and the system stops being truly agentic — it becomes a disguised fixed pipeline with LLM calls sprinkled in.
-
-NaviGraph deliberately avoids this. There are no external evaluator nodes. Quality control is embedded directly in the agent's system prompt as a natural instruction. The agent itself decides whether its retrieved information is sufficient — maintaining full autonomy throughout.
-
----
-
-## Key Features
-
-- **True ReAct Reasoning Loop**: Autonomous single-agent decision making without external evaluator/critic bottleneck nodes.
-- **Hybrid Retrieval (RAG)**: Combined vector semantic search (FAISS with `gemini-embedding-001`) and keyword search (BM25) via LangChain's `EnsembleRetriever` (60% vector / 40% keyword).
-- **Web Search Integration**: Automated web fallback retrieval using the Tavily API when internal knowledge base search yields insufficient information.
-- **LLM Automatic Fallback**: Primary generation using Google Gemini 2.0 Flash with automatic, seamless failover to Groq (Llama 3.3 70B) upon rate limits or errors.
-- **Document Ingestion Pipeline**: In-app PDF/TXT document upload, recursive text chunking, embedding generation, and live FAISS index rebuilding.
-- **Real-Time Token & Thought Streaming**: Server-Sent Events (SSE) streaming both individual token responses and live node-by-node agent execution ("thinking steps").
-- **Persistent Conversation Memory**: Durable graph state checkpointer (`SqliteSaver`) paired with thread session metadata tracking (`SessionStore`).
-- **LangSmith Tracing**: Deep observability and execution tracing grouped by session threads for prompt debugging and latency monitoring.
-- **Modern Interactive UI**: Streamlit-based frontend featuring multi-session management, auto-titling, live thinking step accordions, and document upload management.
+**NaviGraph** is a high-speed, voice-first **Agentic Retrieval-Augmented Generation (RAG)** platform designed for conversational exploration of multi-page technical documents, enterprise PDFs, and live knowledge bases. It pairs a **ChatGPT-web-style floating Voice Mode** with a progressive streaming chat interface, hybrid vector/BM25 retrieval, cross-encoder reranking, and full LLM gateway telemetry.
 
 ---
 
-## Graph Workflow
+## Live Deployments
 
-```mermaid
-flowchart TD
-    Start([User Query]) --> Agent
-
-    Agent["agent_node<br/><br/>LLM: Gemini 2.0 Flash<br/>+ bind_tools([vector_search, web_search])<br/><br/>Reads full message history<br/>Decides next action"]
-
-    Agent --> Decision{should_continue<br/><br/>last_message has<br/>tool_calls?}
-
-    Decision -->|YES| Tools["tools node<br/><br/>Executes requested tool"]
-    Decision -->|NO| End([Final Answer<br/>returned to user])
-
-    Tools --> VectorSearch["vector_search<br/><br/>FAISS semantic<br/>+ BM25 keyword<br/>= EnsembleRetriever<br/>60% / 40%"]
-    Tools --> WebSearch["web_search<br/><br/>Tavily API"]
-
-    VectorSearch --> ToolMsg[ToolMessage appended<br/>to message history]
-    WebSearch --> ToolMsg
-
-    ToolMsg -.loop back.-> Agent
-
-    style Start fill:#2d2d2d,color:#fff
-    style End fill:#2d2d2d,color:#fff
-    style Agent fill:#1a3a5c,color:#fff
-    style Decision fill:#5c3d1a,color:#fff
-    style Tools fill:#1a3a5c,color:#fff
-    style VectorSearch fill:#2d4a2d,color:#fff
-    style WebSearch fill:#2d4a2d,color:#fff
-    style ToolMsg fill:#3d3d3d,color:#fff
-```
-
-### How the Loop Works
-
-1. **Entry** — User query arrives as a `HumanMessage`, appended to the conversation state
-2. **Agent reasons** — The LLM reads the full message history (including system prompt, prior turns, and any tool results already collected) and decides its next action
-3. **Tool call** — If the agent requests a tool, `should_continue()` routes to the `tools` node. The tool executes and its result is appended as a `ToolMessage`
-4. **Loop back** — Control returns to `agent_node`. The agent now sees the tool result and reasons again — it may call another tool, call the same tool with a refined query, or decide it has enough information
-5. **Final answer** — When the agent produces an `AIMessage` with no `tool_calls`, `should_continue()` routes to `END` and the answer is returned
-
-There is no fixed number of steps. A simple greeting takes one pass. A complex research query may loop 3–4 times across both tools.
+| Component | Production URL | Description |
+| :--- | :--- | :--- |
+| **Frontend UI** | [https://navigraphai.vercel.app/](https://navigraphai.vercel.app/) | React 19 SPA with Floating Voice Orb, Document Viewer, Recharts Telemetry Dashboard |
+| **Backend API** | [https://navigraph-api.vercel.app/](https://navigraph-api.vercel.app/) | Express + Node.js API with SSE streaming, Hybrid Vector Search, Edge-TTS, and STT |
 
 ---
 
-## Architecture
+## System Architecture & End-to-End Flow Graph
 
 ```
-Rag/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                  # FastAPI app + startup pre-warming
-│   │   ├── config.py                # Loads .env, exposes DATA_DIR
-│   │   ├── .env                     # API keys (not committed)
-│   │   │
-│   │   ├── graph/
-│   │   │   ├── state.py             # AgentState — messages: Annotated[..., add_messages]
-│   │   │   ├── builder.py           # StateGraph assembly + SqliteSaver checkpointer
-│   │   │   └── routing.py           # should_continue() — tool call vs END
-│   │   │
-│   │   ├── nodes/
-│   │   │   └── agent.py             # agent_node — ReAct loop core
-│   │   │
-│   │   ├── tools/
-│   │   │   ├── vector_search_tool.py
-│   │   │   └── web_search_tool.py
-│   │   │
-│   │   ├── retrievers/
-│   │   │   ├── vector_retriever.py  # HybridRetriever: FAISS + BM25 via EnsembleRetriever
-│   │   │   ├── web_retriever.py     # Tavily wrapper → Document list
-│   │   │   └── ingest.py            # PDF/TXT loader + chunker + index builder
-│   │   │
-│   │   ├── llm/
-│   │   │   ├── llm_client.py        # LLMWithFallback: Gemini → Groq
-│   │   │   └── prompts.py           # Agent system prompt
-│   │   │
-│   │   ├── memory/
-│   │   │   ├── checkpointer.py      # SqliteSaver — persists graph state per thread_id
-│   │   │   └── session_store.py     # SessionStore — session list, titles, timestamps
-│   │   │
-│   │   └── api/
-│   │       ├── routes.py            # /chat, /chat/stream, /sessions, /upload
-│   │       └── schemas.py           # Pydantic models
-│   │
-│   ├── data/
-│   │   ├── vector_store/            # FAISS index files
-│   │   ├── checkpoints.db           # LangGraph conversation state (SQLite)
-│   │   └── sessions.db              # Session metadata (SQLite)
-│   │
-│   └── requirements.txt
-│
-├── frontend/
-│   └── streamlit_app.py             # Streamlit UI
-│
-└── .gitignore
+                                    ┌────────────────────────────────────────────────────────┐
+                                    │               USER BROWSER / CLIENT                    │
+                                    │         https://navigraphai.vercel.app/               │
+                                    └────────────────────────────────────────────────────────┘
+                                               │                                  ▲
+                                   Voice / Mic │                      Live Tokens │ & Audio
+                                       (WebRTC/VAD)                       (SSE)   │
+                                               ▼                                  │
+┌─────────────────────────────────────────────────────────────────────────────────┴──────────┐
+│                             NAVIGRAPH BACKEND API GATEWAY                                  │
+│                          https://navigraph-api.vercel.app/                                 │
+├────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                            │
+│   [POST /voice/transcribe] ──────> Whisper / Groq STT Engine ──────> Raw User Question     │
+│                                                                             │              │
+│   [POST /chat/stream]                                                       │              │
+│       │                                                                     ▼              │
+│       ├───────────────────────────────────────────────► 1. Query Contextualizer & Rewriter │
+│       │                                                                     │              │
+│       ▼                                                                     ▼              │
+│   ┌────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │                      2. HYBRID RETRIEVAL & RERANKING ENGINE                        │   │
+│   │                                                                                    │   │
+│   │      ┌───────────────────────────────┐     ┌──────────────────────────────┐        │   │
+│   │      │ Dense Semantic Vector Search  │     │ BM25 Sparse Keyword Search   │        │   │
+│   │      │ (In-memory cosine similarity) │     │ (Exact term matching)        │        │   │
+│   │      └──────────────┬────────────────┘     └──────────────┬───────────────┘        │   │
+│   │                     │                                     │                        │   │
+│   │                     └───────────────────┬─────────────────┘                        │   │
+│   │                                         ▼                                          │   │
+│   │                             Ensemble Candidate Chunks                              │   │
+│   │                                         ▼                                          │   │
+│   │                           Cross-Encoder Reranker Scoring                           │   │
+│   │                                         ▼                                          │   │
+│   │                         Top-K Context Chunks + Page #s                             │   │
+│   └─────────────────────────────────────────┬──────────────────────────────────────────┘   │
+│                                             ▼                                              │
+│   ┌────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │                         3. LLM GATEWAY REASONING LOOP                              │   │
+│   │                                                                                    │   │
+│   │      Primary Route: Google Gemini 3.8 Flash (Streaming via @google/genai SDK)      │   │
+│   │      Failover Route 1: Groq High-Speed Gateway (openai/gpt-oss-120b)               │   │
+│   │      Failover Route 2: Deterministic ReAct In-Memory Synthesis Engine              │   │
+│   └─────────────────────────────────────────┬──────────────────────────────────────────┘   │
+│                                             │                                              │
+│                        Token Stream Stream  │                                              │
+│                                             ├───────────────► 4. Sentence Chunk Splitter   │
+│                                             │                         │                    │
+│                                             ▼                         ▼                    │
+│                        SSE: 'data: {"token": "..."}'          Edge-TTS Audio Synth         │
+│                        SSE: 'event: latency'                          │                    │
+│                                             │                         ▼                    │
+│                                             │                 [POST /voice/tts]            │
+│                                             │            (WAV / MP3 Binary Stream)         │
+│                                             ▼                         ▼                    │
+└─────────────────────────────────────────────┬─────────────────────────┬────────────────────┘
+                                              │                         │
+                                              ▼                         ▼
+┌────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                FRONTEND REACT RUNTIME                                      │
+├────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                            │
+│   ┌────────────────────────────────────────────────┐   ┌───────────────────────────────┐   │
+│   │ 1. Continuous Chat Feed (100% visible)         │   │ 2. Floating Voice Orb Widget  │   │
+│   │ • Live progressive token markdown rendering    │   │ • 56px reactive circular orb  │   │
+│   │ • Page-level PDF click-through & viewer modal  │   │ • Web Audio API AnalyserNode  │   │
+│   │ • LLM telemetry footer table (TTFT, $, tok/s)  │   │ • Live audio volume scaling   │   │
+│   │ • Recharts visual latency & cost dashboard     │   │ • Interrupt, Mute & Exit      │   │
+│   └────────────────────────────────────────────────┘   └───────────────────────────────┘   │
+│                                                                                            │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Tech Stack
+## Key Highlights
 
-| Layer | Technology |
-|---|---|
-| Agent Orchestration | LangGraph `StateGraph` with ReAct loop |
-| Primary LLM | Google Gemini 2.0 Flash |
-| Fallback LLM | Groq — Llama 3.3 70B Versatile |
-| Embeddings | Google `gemini-embedding-001` |
-| Vector Store | FAISS (semantic search) |
-| Keyword Search | BM25 (`rank-bm25`) |
-| Hybrid Retrieval | LangChain `EnsembleRetriever` (60% FAISS, 40% BM25) |
-| Web Search | Tavily API |
-| Conversation Memory | LangGraph `SqliteSaver` checkpointer |
-| Session Metadata | Custom `SessionStore` (SQLite) |
-| Backend | FastAPI + Uvicorn |
-| Frontend | Streamlit |
-| Observability | LangSmith (project: NaviGraph) |
+### 1. ChatGPT-Web-Style Floating Voice Mode
+* **Non-blocking floating presence**: Voice Mode floats as a compact widget (`fixed bottom-24 right-6`) over the chat screen instead of blocking or replacing the interface.
+* **Continuous live chat stream**: Users can read the AI response streaming in the main chat view, review past messages, and scroll freely while listening.
+* **Web Audio API-driven Voice Orb**:
+  * Connected to an `AnalyserNode` calculating 60FPS frequency energy.
+  * Dynamically scales and glows using GPU-accelerated CSS transforms (`transform: scale(...)`).
+  * Seamless state transitions:
+    * `IDLE`: Subtle resting pearl animation.
+    * `LISTENING`: Pulsing cyan glow indicating live microphone capture.
+    * `THINKING`: Hypnotic amber/gold celestial wave during RAG search.
+    * `SPEAKING`: Electric indigo/purple expansion reacting in real time to TTS audio.
+* **Instant Barge-in**: Tapping "Interrupt" or speaking interrupts TTS playback instantly and transfers control back to the user.
 
----
+### 2. Multi-PDF Document Ingestion & Page-Level Grounding
+* **Structured PDF Chunking**: Extracts raw text while tracking original page numbers.
+* **Multi-PDF Filter Selector**: Focus queries on specific files or search across all indexed documents simultaneously.
+* **Document Viewer Modal**: Click any cited source to inspect the passage directly on the exact page.
 
-## Key Design Decisions
-
-### Single Agent Node
-The entire reasoning loop lives in one `agent_node`. The LLM is bound to both tools via `bind_tools()` and decides autonomously what to do next on every iteration. There is no planner node, no evaluator node, no critic node — just the agent and its tools.
-
-### State = Messages Only
-`AgentState` has a single field: `messages` (an accumulating list using LangGraph's `add_messages` reducer). The agent infers everything it needs — what it has already tried, what it found, whether it needs more information — directly from the message history. No manual fields like `retry_count` or `relevance_score`.
-
-### Hybrid Retrieval
-Vector search alone misses exact keyword matches. BM25 alone misses semantic similarity. The `EnsembleRetriever` combines both with weighted reciprocal rank fusion (60% semantic, 40% keyword), giving better recall across both precise and fuzzy queries.
-
-### LLM Fallback
-`LLMWithFallback` wraps Gemini as primary and Groq as fallback. If Gemini hits a rate limit or fails, the same request is automatically retried on Groq with no change to the agent logic. The UI shows a warning when fallback is triggered.
-
-### Two Separate SQLite Databases
-- `checkpoints.db` — managed entirely by LangGraph's `SqliteSaver`. Stores the full serialized graph state (all messages) per `thread_id`. Never queried directly.
-- `sessions.db` — managed by `SessionStore`. Stores only session metadata (title, timestamps) for the sidebar UI. Queried independently of the checkpointer.
-
-This separation means the session list UI never has to deserialize LangGraph's internal state format just to show a list of conversation titles.
-
-### Streaming via SSE
-The `/chat/stream` endpoint uses `graph.stream(stream_mode=["messages", "updates"])` simultaneously:
-- `messages` mode → streams individual tokens to the frontend as the LLM generates them
-- `updates` mode → emits node-level events (which node ran, what it produced) used to generate the live "Agent thinking..." steps in the UI
+### 3. LLM Gateway Telemetry & Recharts Analytics
+* **Telemetry Table**: Rendered in the chat footer of every assistant turn:
+  * **Latency**: Time to First Token (TTFT), LLM Generation Time, Hybrid Retrieval, Total Turnaround.
+  * **Token Usage**: Prompt tokens, Completion tokens, Total billable tokens, Throughput ($\text{tok/s}$).
+  * **Cost Estimation**: Accurate sub-cent billing based on token unit pricing ($\$0.075 / 1\text{M}$ input, $\$0.30 / 1\text{M}$ output).
+* **LatencyMetricsDashboard**:
+  * Horizontal pipeline breakdown (`BarChart`).
+  * Per-token streaming latency timeline (`AreaChart`).
+  * Token context distribution (`PieChart`).
 
 ---
 
-## API Endpoints
+## Connecting Frontend with Backend
+
+The frontend (`https://navigraphai.vercel.app`) communicates with the backend (`https://navigraph-api.vercel.app`) through the centralized API configuration in `src/utils/api.ts`:
+
+```typescript
+// src/utils/api.ts
+export const API_BASE_URL: string = (() => {
+  // 1. Explicit environment variable
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
+  }
+  // 2. Auto-detect Vercel deployment
+  if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+    return 'https://navigraph-api.vercel.app';
+  }
+  // 3. Local dev fallback (relative proxy)
+  return '';
+})();
+```
+
+### CORS Configuration
+The backend explicitly allows requests from `https://navigraphai.vercel.app`, Vercel preview URLs, and `localhost`:
+
+```typescript
+// server.ts
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        origin.includes('navigraphai.vercel.app') ||
+        origin.includes('navigraph-api.vercel.app') ||
+        origin.includes('localhost') ||
+        origin.endsWith('.vercel.app')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    exposedHeaders: ['X-TTS-Latency-Ms'],
+  })
+);
+```
+
+---
+
+## Environment Variables
+
+Configure these variables in your deployment settings:
+
+### Frontend (.env or Vercel Environment Variables)
+```bash
+# Point frontend to production backend URL
+VITE_API_URL=https://navigraph-api.vercel.app
+```
+
+### Backend (.env or Vercel / Cloud Run Environment Variables)
+```bash
+# Primary LLM API Key (Google AI Studio)
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Optional High-Speed Fallback API Key (Groq)
+GROQ_API_KEY=your_groq_api_key_here
+
+# Server Port (default 3000)
+PORT=3000
+```
+
+---
+
+## API Endpoints Reference
 
 | Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/chat` | Blocking chat — returns full answer |
-| `POST` | `/chat/stream` | SSE streaming — tokens + thinking steps |
-| `GET` | `/sessions` | List all sessions (title, timestamps) |
-| `GET` | `/sessions/{thread_id}/messages` | Load conversation history for a thread |
-| `DELETE` | `/sessions/{thread_id}` | Remove a session from the list |
-| `POST` | `/upload` | Upload documents and rebuild vector index |
-| `GET` | `/` | Health check |
+| :--- | :--- | :--- |
+| `GET` | `/health` or `/api/health` | Service health status and origin permissions |
+| `POST` | `/chat/stream` | Server-Sent Events (SSE) chat stream with thinking steps, tokens, and latency |
+| `POST` | `/voice/transcribe` | Multipart audio upload for Whisper / Gemini STT |
+| `POST` | `/voice/tts` | Edge-TTS sentence audio synthesizer |
+| `GET` | `/sessions` | List active chat threads |
+| `GET` | `/sessions/:id/messages` | Load historical messages for a thread |
+| `DELETE` | `/sessions/:id` | Delete a session and its message store |
+| `POST` | `/upload` | Multipart upload for PDF and TXT documents |
+| `GET` | `/api/documents` | List indexed documents and chunk statistics |
+| `GET` | `/api/documents/:filename/view` | Stream raw PDF or JSON document content |
 
 ---
 
-## Running Locally
+## Local Development
 
-**Prerequisites:** Python 3.11+, API keys for Gemini, Groq, and Tavily
+```bash
+# 1. Install dependencies
+npm install
 
-**1. Clone and set up environment**
-```powershell
-cd Rag
-python -m venv venv
-& "venv\Scripts\Activate.ps1"
-pip install -r backend/requirements.txt
+# 2. Start the unified development server (Vite + Express on port 3000)
+npm run dev
+
+# 3. Build for production
+npm run build
+
+# 4. Run production server
+npm start
 ```
-
-**2. Configure API keys** — edit `backend/app/.env`:
-```
-GOOGLE_API_KEY=your_key
-GROQ_API_KEY=your_key
-TAVILY_API_KEY=your_key
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=your_langsmith_key
-LANGCHAIN_PROJECT=NaviGraph
-```
-
-**3. Start backend** (from `backend/app/`):
-```powershell
-& "..\..\venv\Scripts\uvicorn.exe" main:app --reload --port 8000
-```
-
-**4. Start frontend** (new terminal):
-```powershell
-& "venv\Scripts\streamlit.exe" run frontend\streamlit_app.py
-```
-
-Open `http://localhost:8501`
-
----
-
-## Uploading Documents
-
-1. Use the **Upload Documents** section in the sidebar
-2. Upload PDF, TXT, or MD files
-3. Click **Ingest** — files are chunked (1000 chars, 200 overlap) and indexed into FAISS + BM25
-4. Ask questions — the agent will automatically search the knowledge base when relevant
-
----
-
-## LangSmith Observability
-
-Every graph run is traced to LangSmith under project **NaviGraph**. Each conversation is grouped as a separate Thread using `metadata: {"session_id": thread_id}`. In the LangSmith UI you can see:
-
-- Every agent loop iteration
-- Which tools were called and with what queries
-- Token counts and latency per node
-- Whether Gemini or Groq handled each request
-
----
-
-## Known Limitations
-
-- **Ephemeral storage on hosted deployments**: `checkpoints.db`, `sessions.db`, and the FAISS index live inside the container's filesystem. On platforms like Hugging Face Spaces (free tier), a redeploy or rebuild resets these files. For production use, this would be swapped for a managed database (e.g., Supabase Postgres) to ensure persistence across restarts.
-- **Free-tier rate limits**: Gemini and Groq free tiers impose request-per-minute caps. Under heavy or rapid testing, fallback to Groq may trigger more frequently.
-- **No authentication**: The API currently has no auth layer — intended for local/demo use, not multi-tenant production deployment.
-
----
-
-## License
-
-This project is for portfolio and educational purposes.
