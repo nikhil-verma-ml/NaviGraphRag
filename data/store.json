@@ -5,6 +5,30 @@
       "created_at": "2026-10-04T05:18:49.957Z",
       "last_active_at": "2026-10-04T05:18:49.957Z",
       "title": "Summarize the uploaded documents"
+    },
+    {
+      "thread_id": "test_summary_turn",
+      "created_at": "2026-10-06T14:35:27.856Z",
+      "last_active_at": "2026-10-06T14:35:27.856Z",
+      "title": "How do I connect HTML to CSS?"
+    },
+    {
+      "thread_id": "test_summary_check",
+      "created_at": "2026-10-06T14:35:44.749Z",
+      "last_active_at": "2026-10-06T14:35:44.749Z",
+      "title": "How do I connect HTML to CSS?"
+    },
+    {
+      "thread_id": "test_summary_check_2",
+      "created_at": "2026-10-06T14:35:58.747Z",
+      "last_active_at": "2026-10-06T14:35:58.747Z",
+      "title": "How do I connect HTML to CSS?"
+    },
+    {
+      "thread_id": "test_summary_check_3",
+      "created_at": "2026-10-06T14:36:31.601Z",
+      "last_active_at": "2026-10-06T14:36:31.601Z",
+      "title": "How do I connect HTML to CSS?"
     }
   ],
   "messages": {
@@ -144,6 +168,53 @@
           }
         ],
         "timestamp": "2026-10-04T19:48:02.909Z"
+      }
+    ],
+    "test_summary_check_3": [
+      {
+        "role": "user",
+        "content": "How do I connect HTML to CSS?",
+        "timestamp": "2026-10-06T14:36:36.724Z"
+      },
+      {
+        "role": "assistant",
+        "content": "You can attach CSS to an HTML page in three common ways: **external stylesheet**, **internal stylesheet**, and **inline styles**. The most flexible and maintainable method is the external stylesheet.\n\n---\n\n## 1. External stylesheet (recommended)\n\n1. **Create a CSS file** (e.g., `styles.css`) and put your CSS rules there.\n\n   ```css\n   /* styles.css */\n   body {\n       font-family: Arial, sans-serif;\n       background-color: #f9f9f9;\n       margin: 0;\n       padding: 0;\n   }\n\n   h1 {\n       color: #2c3e50;\n   }\n\n   .button {\n       background-color: #3498db;\n       color: white;\n       padding: 10px 20px;\n       border: none;\n       border-radius: 4px;\n       cursor: pointer;\n   }\n   ```\n\n2. **Link the CSS file in the `<head>` of your HTML document** using the `<link>` element.\n\n   ```html\n   <!DOCTYPE html>\n   <html lang=\"en\">\n   <head>\n       <meta charset=\"UTF-8\">\n       <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n       <title>My Page</title>\n\n       <!-- Connect HTML to CSS -->\n       <link rel=\"stylesheet\" href=\"styles.css\">\n   </head>\n   <body>\n       <h1>Hello, world!</h1>\n       <button class=\"button\">Click me</button>\n   </body>\n   </html>\n   ```\n\n   * `rel=\"stylesheet\"` tells the browser the linked file is a stylesheet.  \n   * `href=\"styles.css\"` is the path to the CSS file. Use a relative path (`styles.css`, `css/styles.css`) or an absolute URL (`https://example.com/styles.css`) as needed.\n\n---\n\n## 2. Internal stylesheet (within the same HTML file)\n\nIf you have only a few styles or are prototyping, you can place CSS inside a `<style>` block in the `<head>`:\n\n```html\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <title>Internal CSS Example</title>\n    <style>\n        body { background: #fafafa; font-family: sans-serif; }\n        h1   { color: #e74c3c; }\n    </style>\n</head>\n<body>\n    <h1>Welcome!</h1>\n</body>\n</html>\n```\n\n---\n\n## 3. Inline styles (directly on an element)\n\nFor a single, one‑off style you can use the `style` attribute:\n\n```html\n<h1 style=\"color: #e74c3c; margin-top: 20px;\">Inline Styled Heading</h1>\n```\n\n*Inline styles have the highest specificity, so they override external/internal rules, but they make maintenance harder and should be used sparingly.*\n\n---\n\n## Quick checklist\n\n| Method | When to use | Pros | Cons |\n|--------|-------------|------|------|\n| **External** (`<link>`) | Production sites, reusable styles across many pages | Clean separation, caching, easy maintenance | Requires an extra file |\n| **Internal** (`<style>`) | Small projects, demos, or when you need page‑specific CSS only | No extra file, still keeps CSS separate from HTML markup | Not reusable across pages |\n| **Inline** (`style=`) | One‑off overrides, email templates | Immediate effect, highest specificity | Hard to maintain, clutters HTML |\n\n---\n\n### Common pitfalls\n\n* **Wrong path** – If the CSS file isn’t found, the browser console will show a 404 error. Verify the `href` path relative to the HTML file’s location.\n* **Missing `rel` attribute** – Without `rel=\"stylesheet\"` the browser won’t treat the linked file as CSS.\n* **Cache issues** – Browsers cache CSS files. When you update `styles.css`, you may need to force a refresh (e.g., `styles.css?v=2`) or clear the cache during development.\n\n---\n\n### TL;DR\n\n```html\n<link rel=\"stylesheet\" href=\"path/to/your/styles.css\">\n```\n\nPlace that line inside the `<head>` of your HTML, and the CSS rules in `styles.css` will automatically apply to the page. Use internal `<style>` blocks or inline `style=` attributes only for quick tests or very limited styling.",
+        "voiceSummary": "You can attach CSS to an HTML page in three common ways: external stylesheet, internal stylesheet, and inline styles. The most flexible and maintainable method is the external stylesheet.",
+        "sources": [
+          {
+            "type": "vector_search",
+            "content": "Our Agentic RAG system is built using LangGraph, FastAPI, and Streamlit (migrated to Node.js / React for AI Studio). It uses a single agent node with a ReAct loop. Rather than using external CRAG or Self-RAG evaluator nodes, quality control is handled entirely in the agent's system prompt to maintain agentic autonomy.",
+            "source": "architecture_guide.md",
+            "title": "architecture_guide.md",
+            "pageNumber": 1,
+            "score": 0.27
+          },
+          {
+            "type": "vector_search",
+            "content": "The system uses a hybrid retriever combining FAISS / vector semantic search and BM25 keyword search using an EnsembleRetriever, with weights 0.6 for semantic search and 0.4 for BM25. A cross-encoder reranker scores candidate chunks to eliminate false positives.",
+            "source": "retriever_guide.md",
+            "title": "retriever_guide.md",
+            "pageNumber": 1,
+            "score": 0.25
+          },
+          {
+            "type": "vector_search",
+            "content": "The primary model is Google Gemini (gemini-3.8-flash / gemini-3.1-flash-lite). If Gemini fails or hits rate limits, the system automatically falls back to Groq running llama-3.3-70b-versatile, ensuring high availability.",
+            "source": "llm_guide.md",
+            "title": "llm_guide.md",
+            "pageNumber": 3,
+            "score": 0.2
+          },
+          {
+            "type": "vector_search",
+            "content": "Conversation memory is persisted across turns using a checkpointer. Follow-up queries are rewritten with conversation context into standalone search queries before retrieval.",
+            "source": "memory_guide.md",
+            "title": "memory_guide.md",
+            "pageNumber": 2,
+            "score": 0.06
+          }
+        ],
+        "timestamp": "2026-10-06T14:36:36.725Z"
       }
     ]
   }

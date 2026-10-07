@@ -8,6 +8,7 @@
  */
 
 import { apiUrl } from './api.js';
+import { cleanTextForSpeech } from './voiceSummary.js';
 
 export interface QueueItem {
   buffer: AudioBuffer;
@@ -171,22 +172,7 @@ export class StreamingAudioQueue {
   }
 
   private cleanTextForSpeech(text: string): string {
-    return text
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-      .replace(/\[(?:Result\s*)?\d+[^\]]*\]/gi, ' ')
-      .replace(/\[source:[^\]]*\]/gi, ' ')
-      .replace(/\(source:[^)]*\)/gi, ' ')
-      .replace(/\[\d+\]/g, ' ')
-      .replace(/^#{1,6}\s+/gm, '')
-      .replace(/(\*\*|__)(.*?)\1/g, '$2')
-      .replace(/(\*|_)(.*?)\1/g, '$2')
-      .replace(/^\s*\d+\.\s+/gm, '')
-      .replace(/^[\s*+-]+\s+/gm, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    return cleanTextForSpeech(text);
   }
 
   /**

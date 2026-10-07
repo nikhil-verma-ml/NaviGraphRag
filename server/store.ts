@@ -11,6 +11,7 @@ export interface SessionRecord {
 export interface StoredMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
+  voiceSummary?: string;
   name?: string;
   sources?: { type: string; content: string }[];
   timestamp?: string;

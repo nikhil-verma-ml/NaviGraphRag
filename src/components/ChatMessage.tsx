@@ -20,6 +20,10 @@ import { ThinkingAccordion } from './ThinkingAccordion.js';
 import { SourcesExpander } from './SourcesExpander.js';
 import { LatencyMetricsDashboard } from './LatencyMetricsDashboard.js';
 import { ChatMessage as ChatMessageType } from '../types.js';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import { extractVoiceSummary } from '../utils/voiceSummary.js';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -116,9 +120,14 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 </div>
               ) : (
                 <button
-                  onClick={() => onPlayAudio?.(message.content, message.audioVoice)}
+                  onClick={() =>
+                    onPlayAudio?.(
+                      message.voiceSummary || extractVoiceSummary(message.content),
+                      message.audioVoice
+                    )
+                  }
                   className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-slate-600 hover:text-blue-700 hover:bg-slate-100 border border-transparent hover:border-slate-200 transition-colors"
-                  title="Listen to this answer"
+                  title="Listen to concise spoken summary"
                 >
                   <Volume2 className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Listen</span>
@@ -134,12 +143,105 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         )}
 
         {/* Message content */}
-        <div className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap break-words">
-          {message.content}
-          {isStreaming && (
-            <span className="inline-block w-1.5 h-4 ml-0.5 bg-blue-600 animate-pulse align-middle" />
-          )}
-        </div>
+        {isUser ? (
+          <div className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap break-words">
+            {message.content}
+          </div>
+        ) : (
+          <div className="text-sm text-slate-800 leading-relaxed break-words space-y-1">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw]}
+              components={{
+                h1: ({ children }) => (
+                  <h1 className="text-lg font-bold text-slate-900 mt-4 mb-2 first:mt-0 tracking-tight">
+                    {children}
+                  </h1>
+                ),
+                h2: ({ children }) => (
+                  <h2 className="text-base font-bold text-slate-900 mt-3.5 mb-1.5 first:mt-0 tracking-tight">
+                    {children}
+                  </h2>
+                ),
+                h3: ({ children }) => (
+                  <h3 className="text-sm font-bold text-slate-900 mt-2.5 mb-1 first:mt-0">
+                    {children}
+                  </h3>
+                ),
+                p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-relaxed">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc pl-5 mb-2.5 space-y-1">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-5 mb-2.5 space-y-1">{children}</ol>,
+                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-4 border-blue-500 pl-3.5 py-1.5 my-2.5 text-slate-600 bg-slate-50/80 rounded-r-lg italic">
+                    {children}
+                  </blockquote>
+                ),
+                table: ({ children }) => (
+                  <div className="my-3 overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
+                    <table className="min-w-full divide-y divide-slate-200 text-xs text-left">
+                      {children}
+                    </table>
+                  </div>
+                ),
+                thead: ({ children }) => <thead className="bg-slate-100/80 font-semibold text-slate-900">{children}</thead>,
+                tbody: ({ children }) => <tbody className="divide-y divide-slate-100 bg-white">{children}</tbody>,
+                tr: ({ children }) => <tr className="hover:bg-slate-50/70 transition-colors">{children}</tr>,
+                th: ({ children }) => (
+                  <th className="px-3.5 py-2 font-semibold text-slate-900 border-r last:border-r-0 border-slate-200">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }) => (
+                  <td className="px-3.5 py-2 text-slate-700 border-r last:border-r-0 border-slate-100">
+                    {children}
+                  </td>
+                ),
+                pre: ({ children }) => (
+                  <pre className="my-3 p-3.5 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto leading-relaxed border border-slate-800 shadow-2xs">
+                    {children}
+                  </pre>
+                ),
+                code: ({ className, children, ...props }: any) => {
+                  const isInline = !className && !String(children).includes('\n');
+                  if (isInline) {
+                    return (
+                      <code
+                        className="px-1.5 py-0.5 rounded-md bg-slate-100 text-blue-700 font-mono text-[12px] border border-slate-200/80"
+                        {...props}
+                      >
+                        {children}
+                      </code>
+                    );
+                  }
+                  return (
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  );
+                },
+                a: ({ href, children }) => (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline underline-offset-2 font-medium transition-colors"
+                  >
+                    {children}
+                  </a>
+                ),
+                strong: ({ children }) => <strong className="font-semibold text-slate-950">{children}</strong>,
+                em: ({ children }) => <em className="italic text-slate-800">{children}</em>,
+                hr: () => <hr className="my-3.5 border-slate-200" />,
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+            {isStreaming && (
+              <span className="inline-block w-1.5 h-4 ml-0.5 bg-blue-600 animate-pulse align-middle" />
+            )}
+          </div>
+        )}
 
         {/* Sources Expander (with Page Numbers & PDF Click-through) */}
         {!isUser && message.sources && message.sources.length > 0 && (

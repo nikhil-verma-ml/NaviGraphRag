@@ -122,6 +122,9 @@ const handleChatStream = async (req: express.Request, res: express.Response) => 
         onLatency: (latency) => {
           sendEvent('latency', latency);
         },
+        onVoiceSummary: (voiceSummary) => {
+          sendEvent('voice_summary', { summary: voiceSummary });
+        },
       },
       {
         fileFilter,

@@ -33,7 +33,8 @@ export interface LatencyMetrics {
 export interface ChatMessage {
   id?: string;
   role: 'user' | 'assistant';
-  content: string;
+  content: string; // Full complete LLM answer rendered in Markdown in the chat UI
+  voiceSummary?: string; // Short 1-3 sentence natural spoken summary for TTS
   sources?: Source[];
   thinkingSteps?: string[];
   audioVoice?: string;

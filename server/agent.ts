@@ -45,6 +45,7 @@ export interface AgentStreamCallbacks {
   onToken: (token: string) => void;
   onSources: (sources: SourceItem[]) => void;
   onLatency?: (latency: LatencyMetrics) => void;
+  onVoiceSummary?: (summary: string) => void;
 }
 
 export interface AgentStreamOptions {
@@ -57,7 +58,7 @@ export async function runAgentStream(
   threadId: string,
   callbacks: AgentStreamCallbacks,
   options?: AgentStreamOptions
-): Promise<{ answer: string; sources: SourceItem[]; latency: LatencyMetrics }> {
+): Promise<{ answer: string; voiceSummary: string; sources: SourceItem[]; latency: LatencyMetrics }> {
   const startTime = Date.now();
   const store = getSessionStore();
   const pastMessages = store.getFilteredMessages(threadId);
@@ -284,9 +285,13 @@ export async function runAgentStream(
         latency.llmTotalMs = Date.now() - llmStart;
       }
 
+      // Generate concise natural 1-3 sentence spoken summary for TTS
+      const voiceSummary = await generateVoiceSummary(effectiveQuery, fullAnswer);
+      callbacks.onVoiceSummary?.(voiceSummary);
+
       callbacks.onSources(sources);
       store.addMessage(threadId, { role: 'user', content: query });
-      store.addMessage(threadId, { role: 'assistant', content: fullAnswer, sources });
+      store.addMessage(threadId, { role: 'assistant', content: fullAnswer, voiceSummary, sources });
 
       latency.totalMs = Date.now() - startTime;
       latency.provider = 'Google Gemini Gateway';
@@ -323,7 +328,7 @@ export async function runAgentStream(
         `[LLM Gateway] ${latency.provider} (${latency.model}) | Status: ${latency.gatewayStatus} | TTFT: ${latency.llmFirstTokenMs}ms | Throughput: ${latency.tokensPerSec} tok/s | Tokens: ${latency.totalTokens} (P:${latency.promptTokens}/C:${latency.completionTokens}) | Cost: ${latency.costFormatted} | Retrieval: ${latency.retrievalMs}ms | Total: ${latency.totalMs}ms`
       );
 
-      return { answer: fullAnswer, sources, latency };
+      return { answer: fullAnswer, voiceSummary, sources, latency };
     } catch (err: any) {
       console.warn('[runAgentStream] Primary Gemini error, checking fallback:', err.message || err);
 
@@ -337,9 +342,11 @@ export async function runAgentStream(
             sources,
             options?.fileFilter
           );
+          const voiceSummary = await generateVoiceSummary(effectiveQuery, groqAnswer);
+          callbacks.onVoiceSummary?.(voiceSummary);
           callbacks.onSources(sources);
           store.addMessage(threadId, { role: 'user', content: query });
-          store.addMessage(threadId, { role: 'assistant', content: groqAnswer, sources });
+          store.addMessage(threadId, { role: 'assistant', content: groqAnswer, voiceSummary, sources });
 
           latency.totalMs = Date.now() - startTime;
           latency.provider = 'Groq High-Speed Gateway';
@@ -353,7 +360,7 @@ export async function runAgentStream(
           latency.costUsd = Number(groqTotalCost.toFixed(6));
           latency.costFormatted = `$${groqTotalCost.toFixed(6)}`;
           callbacks.onLatency?.(latency);
-          return { answer: groqAnswer, sources, latency };
+          return { answer: groqAnswer, voiceSummary, sources, latency };
         } catch (groqErr) {
           console.warn('[runAgentStream] Groq fallback failed:', groqErr);
         }
@@ -466,7 +473,7 @@ async function runDeterministicReAct(
   startTime: number,
   latency: LatencyMetrics,
   fileFilter?: string
-): Promise<{ answer: string; sources: SourceItem[]; latency: LatencyMetrics }> {
+): Promise<{ answer: string; voiceSummary: string; sources: SourceItem[]; latency: LatencyMetrics }> {
   callbacks.onThinking('🔍 Hybrid retrieval & cross-encoder reranker');
   const retStart = Date.now();
   const vResult = await vectorSearchTool(query, { fileFilter });
@@ -491,9 +498,12 @@ async function runDeterministicReAct(
     await new Promise((r) => setTimeout(r, 15));
   }
 
+  const voiceSummary = extractFallbackVoiceSummary(answer);
+  callbacks.onVoiceSummary?.(voiceSummary);
+
   const store = getSessionStore();
   store.addMessage(threadId, { role: 'user', content: query });
-  store.addMessage(threadId, { role: 'assistant', content: answer, sources });
+  store.addMessage(threadId, { role: 'assistant', content: answer, voiceSummary, sources });
 
   latency.totalMs = Date.now() - startTime;
   latency.provider = 'Deterministic ReAct Engine';
@@ -507,5 +517,94 @@ async function runDeterministicReAct(
   latency.tokensPerSec = 75.0;
   callbacks.onLatency?.(latency);
 
-  return { answer, sources, latency };
+  return { answer, voiceSummary, sources, latency };
+}
+
+/**
+ * Server-side fallback voice summary extractor.
+ * Strips markdown, code, tables, URLs, citations, and leaked UI tokens,
+ * extracting 1-3 natural declarative sentences for audio speech.
+ */
+export function extractFallbackVoiceSummary(text: string): string {
+  if (!text) return '';
+  const cleaned = text
+    .replace(/\bsvgListen\b/gi, ' ')
+    .replace(/\bsvg\b/gi, ' ')
+    .replace(/\bNaviGraph Agent\b/gi, ' ')
+    .replace(/\bAgent steps\b/gi, ' ')
+    .replace(/\bAgent thinking\b/gi, ' ')
+    .replace(/\bThinking Steps\b/gi, ' ')
+    .replace(/\bListen\b/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\|.*\|$/gm, ' ')
+    .replace(/\|/g, ', ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\[(?:Source|source|Result|result|Page|page)[^\]]*\]/gi, ' ')
+    .replace(/\((?:Source|source|Result|result|Page|page)[^)]*\)/gi, ' ')
+    .replace(/\[\d+\]/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/(\*|_)(.*?)\1/g, '$2')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/^[\s*+-]+\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const sentences = cleaned.match(/[^.!?]+[.!?]+(?:\s+|$)/g) || [];
+  if (sentences.length === 0) return cleaned.slice(0, 250).trim();
+  const valid = sentences
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 15 && !/^(e\.g|i\.e|mr|mrs|dr|vs)\.?$/i.test(s));
+  return valid.slice(0, 2).join(' ') || cleaned.slice(0, 250).trim();
+}
+
+/**
+ * Generates a concise, natural, 1 to 3 sentence spoken summary for TTS using Gemini Flash.
+ * Falls back to extractFallbackVoiceSummary if the API call is unavailable or fails.
+ */
+export async function generateVoiceSummary(query: string, fullAnswer: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!apiKey || fullAnswer.length < 40) {
+    return extractFallbackVoiceSummary(fullAnswer);
+  }
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+    });
+    const prompt = `You are a voice assistant synthesizer for NaviGraph.
+Given the user's question and the comprehensive detailed response, synthesize a concise, natural, 1 to 3 sentence spoken summary suitable for audio text-to-speech.
+
+User Question: "${query}"
+
+Full Detailed Answer:
+${fullAnswer.slice(0, 3000)}
+
+Strict Rules:
+1. Exactly 1 to 3 natural conversational sentences (approx 25 to 55 words).
+2. Spoken plain conversational English only.
+3. Absolutely NO markdown, NO asterisks, NO bullet points, NO code blocks, NO table syntax, NO URLs, NO citations, and NO UI metadata.
+4. Do NOT say "In summary" or "Here is a summary". State the core answer directly.`;
+
+    const res = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: prompt,
+      config: {
+        temperature: 0.1,
+        maxOutputTokens: 120,
+      },
+    });
+
+    const summary = (res.text || '').trim();
+    if (summary && summary.length > 10) {
+      return summary;
+    }
+  } catch (err) {
+    console.warn('[generateVoiceSummary] LLM summary generation notice:', err);
+  }
+
+  return extractFallbackVoiceSummary(fullAnswer);
 }

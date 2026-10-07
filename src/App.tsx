@@ -30,6 +30,7 @@ import {
 } from './types.js';
 import { StreamingAudioQueue } from './utils/streamingAudioQueue.js';
 import { useContinuousVoice } from './utils/useContinuousVoice.js';
+import { extractVoiceSummary } from './utils/voiceSummary.js';
 import { apiUrl } from './utils/api.js';
 
 export function App() {
@@ -66,16 +67,16 @@ export function App() {
   const [audioContextState, setAudioContextState] = useState<AudioContextState | 'unavailable' | 'unknown'>('unknown');
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Computed ChatGPT-like Conversation State: IDLE, LISTENING, THINKING, SPEAKING
-  const conversationState: VoiceConversationState = !voiceModeActive
-    ? 'IDLE'
-    : isListening
-    ? 'LISTENING'
+  // Computed Conversation State: IDLE, LISTENING, THINKING, SPEAKING
+  const conversationState: VoiceConversationState = isSpeaking
+    ? 'SPEAKING'
     : isThinking
     ? 'THINKING'
-    : isSpeaking
-    ? 'SPEAKING'
-    : 'LISTENING';
+    : isListening
+    ? 'LISTENING'
+    : voiceModeActive
+    ? 'LISTENING'
+    : 'IDLE';
 
   // Refs for audioQueue, abortController, and auto-scroll
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -327,11 +328,12 @@ export function App() {
   };
 
   // Play whole message on demand (when user clicks "Listen" on any bubble)
-  const playSpeechForText = async (text: string) => {
+  const playSpeechForText = async (text: string, voice?: string) => {
     stopAudio();
     if (!audioQueueRef.current) return;
     audioQueueRef.current.reset();
-    await audioQueueRef.current.enqueueSentence(text);
+    const speechText = extractVoiceSummary(text);
+    await audioQueueRef.current.enqueueSentence(speechText, voice);
   };
 
   // Fetch session list
@@ -475,12 +477,10 @@ export function App() {
     setCurrentSources([]);
 
     let answerAccumulator = '';
+    let voiceSummaryAccumulator = '';
     let sourcesAccumulator: Source[] = [];
     let latencyAccumulator: LatencyMetrics | undefined;
     const stepsAccumulator: string[] = [];
-
-    // Streaming TTS sentence tracking buffer
-    let streamingTTSBuffer = '';
 
     try {
       const response = await fetch(apiUrl('/chat/stream'), {
@@ -535,40 +535,24 @@ export function App() {
                 setCurrentThinkingSteps([...stepsAccumulator]);
               } else if (eventType === 'token') {
                 const token = payload.text || '';
-                console.log('[LLM chunk]', token);
                 answerAccumulator += token;
-                streamingTTSBuffer += token;
 
-                // IMMEDIATELY update current assistant message so tokens stream progressively!
+                // IMMEDIATELY update current assistant message so complete LLM answer streams progressively!
                 setCurrentAssistantMessage(answerAccumulator);
 
-                // Switch from THINKING to SPEAKING as soon as tokens arrive
+                // Switch from THINKING state as soon as tokens arrive
                 setIsThinking(false);
+              } else if (eventType === 'voice_summary') {
+                // Short natural 1-3 sentence spoken summary specifically for TTS
+                voiceSummaryAccumulator = payload.summary || '';
+                console.log('[Voice summary received]', voiceSummaryAccumulator);
 
-                // Streaming TTS: detect completed sentence boundary to start speech immediately
                 if (
                   speakAnswers &&
                   audioQueueRef.current &&
                   audioQueueRef.current.canEnqueueMore()
                 ) {
-                  const sentenceMatch = streamingTTSBuffer.match(/([^.!?।\n]+[.!?।]+)(?:\s+|$)/);
-                  if (sentenceMatch && sentenceMatch[0]) {
-                    const matchedFull = sentenceMatch[0];
-                    const rawSentence = sentenceMatch[1] || '';
-                    const matchIdx = streamingTTSBuffer.indexOf(matchedFull);
-                    streamingTTSBuffer = streamingTTSBuffer.substring(matchIdx + matchedFull.length);
-
-                    const cleaned = rawSentence
-                      .replace(/^#{1,6}\s+/g, '')
-                      .replace(/^\s*\d+\.\s*/g, '')
-                      .replace(/^\s*[-*+]\s*/g, '')
-                      .trim();
-
-                    if (cleaned.length >= 6 && !/^(e\.g|i\.e|mr|mrs|dr|vs)\.?$/i.test(cleaned)) {
-                      console.log('[Sentence]', cleaned);
-                      audioQueueRef.current.enqueueSentence(cleaned);
-                    }
-                  }
+                  audioQueueRef.current.enqueueSentence(voiceSummaryAccumulator);
                 }
               } else if (eventType === 'sources') {
                 sourcesAccumulator = payload;
@@ -584,18 +568,6 @@ export function App() {
         }
       }
 
-      // Stream completed: enqueue any remaining sentence fragment
-      if (speakAnswers && audioQueueRef.current && audioQueueRef.current.canEnqueueMore()) {
-        const remaining = streamingTTSBuffer
-          .replace(/^#{1,6}\s+/g, '')
-          .replace(/^\s*\d+\.\s*/g, '')
-          .replace(/^\s*[-*+]\s*/g, '')
-          .trim();
-        if (remaining.length >= 2) {
-          audioQueueRef.current.enqueueSentence(remaining);
-        }
-      }
-
       const finalContent = answerAccumulator.trim()
         ? answerAccumulator
         : sourcesAccumulator.length > 0
@@ -605,21 +577,28 @@ export function App() {
             .join('\n\n')
         : 'I completed processing the query.';
 
-      // If speech is enabled and nothing has been spoken yet, speak the answer
+      // Extract or retrieve the concise 1-3 sentence voice summary
+      const finalVoiceSummary =
+        voiceSummaryAccumulator.trim() || extractVoiceSummary(finalContent);
+
+      // If speech is enabled and nothing has been spoken yet, speak the voice summary
       if (
         speakAnswers &&
         audioQueueRef.current &&
         audioQueueRef.current.getEnqueuedCount() === 0
       ) {
-        audioQueueRef.current.enqueueSentence(finalContent);
+        audioQueueRef.current.enqueueSentence(finalVoiceSummary);
       }
 
-      // Finalize assistant message in conversation history
+      // Finalize assistant message in conversation history with BOTH representations:
+      // content: full complete LLM answer for chat UI
+      // voiceSummary: short natural summary for TTS audio
       const assistantMsgId = 'asst_' + Date.now();
       const finalAssistantMsg: ChatMessageType = {
         id: assistantMsgId,
         role: 'assistant',
-        content: finalContent,
+        content: finalContent, // fullAnswer → chat
+        voiceSummary: finalVoiceSummary, // voiceSummary → TTS
         sources: sourcesAccumulator,
         thinkingSteps: [...stepsAccumulator],
         latency: latencyAccumulator,
@@ -879,7 +858,9 @@ export function App() {
               message={msg}
               showThinkingSteps={true}
               isPlayingAudio={isSpeaking}
-              onPlayAudio={(text) => playSpeechForText(text)}
+              onPlayAudio={(text, voice) =>
+                playSpeechForText(msg.voiceSummary || text, voice || msg.audioVoice)
+              }
               onStopAudio={stopAudio}
             />
           ))}
@@ -921,20 +902,6 @@ export function App() {
           isAudioSuspended={audioContextState === 'suspended'}
           onActivateAudio={handleActivateAudio}
         />
-
-        {/* Floating Barge-in Audio Interrupter when speaking */}
-        {isSpeaking && !voiceModeActive && (
-          <div className="max-w-4xl mx-auto w-full px-4 mb-2 flex items-center justify-end">
-            <button
-              onClick={handleBargeIn}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium shadow-sm transition-all animate-pulse"
-              title="Click to interrupt audio"
-            >
-              <Square className="w-3 h-3 fill-current" />
-              <span>Speaking audio... Click to interrupt</span>
-            </button>
-          </div>
-        )}
 
         {/* Input Bar with VAD Voice & Typed Input */}
         <div className="p-4 border-t border-slate-200 bg-white shrink-0">
